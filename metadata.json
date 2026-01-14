@@ -1,0 +1,5 @@
+{
+  "name": "BidSmart-Index",
+  "description": "A vectorless, tree-based tender reasoning assistant proof of concept.",
+  "requestFramePermissions": []
+}
