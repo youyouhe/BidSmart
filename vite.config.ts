@@ -8,6 +8,19 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          // Proxy API requests to local PageIndex server to avoid CORS
+          '/api': {
+            target: env.VITE_PAGEINDEX_API_URL || 'http://localhost:8003',
+            changeOrigin: true,
+          },
+          // Proxy WebSocket connections to local PageIndex server
+          '/ws': {
+            target: env.VITE_PAGEINDEX_API_URL || 'http://localhost:8003',
+            changeOrigin: true,
+            ws: true,
+          }
+        }
       },
       plugins: [react()],
       define: {

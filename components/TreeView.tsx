@@ -60,7 +60,13 @@ const TreeView: React.FC<TreeViewProps> = ({ node, activeNodeIds = [], depth = 0
           )}
         </span>
 
-        <span className="truncate text-sm leading-tight">{node.title}</span>
+        <span className="truncate text-sm leading-tight flex-1">{node.title}</span>
+        {/* Show page range for PDF nodes */}
+        {node.page_start !== undefined && node.page_end !== undefined && (
+          <span className="text-xs text-gray-400 ml-2 shrink-0">
+            p.{node.page_start}-{node.page_end}
+          </span>
+        )}
       </div>
 
       {hasChildren && isOpen && (
