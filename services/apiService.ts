@@ -19,19 +19,47 @@ import {
   PerformanceStats
 } from '../types';
 import { subscribeToDocumentStatus, DocumentWebSocket, WebSocketCallbacks } from './websocketService';
+import { loadSettings, type ApiSettings } from '../components/SettingsModal';
 
 // API Configuration
+// Load from settings or use defaults
+let currentSettings: ApiSettings = loadSettings();
 
-// API Configuration
-// In development, use empty string to leverage Vite proxy (avoids CORS)
-// In production, use the full remote API URL
-// @ts-ignore - Vite environment variables
-const REMOTE_API_URL = import.meta.env.VITE_PAGEINDEX_API_URL || import.meta.env.NEXT_PUBLIC_PAGEINDEX_API_URL || 'http://192.168.8.107:8003';
-// @ts-ignore
-const IS_DEV = import.meta.env.DEV;
+// Export function to update settings
+export const updateApiSettings = (settings: ApiSettings) => {
+  currentSettings = settings;
+};
 
-// Use Vite proxy in development to avoid CORS, direct URL in production
-const API_BASE_URL = IS_DEV ? '' : REMOTE_API_URL;
+// Get current API base URL
+export const getApiBaseUrl = (): string => {
+  return currentSettings.endpoint.trim();
+};
+
+// Get auth headers
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (currentSettings.token && currentSettings.token.trim()) {
+    headers['Authorization'] = `Bearer ${currentSettings.token.trim()}`;
+  }
+
+  return headers;
+};
+
+// Get auth headers for FormData requests (without Content-Type)
+const getAuthHeadersForFormData = (): Record<string, string> => {
+  const headers: Record<string, string> = {};
+
+  if (currentSettings.token && currentSettings.token.trim()) {
+    headers['Authorization'] = `Bearer ${currentSettings.token.trim()}`;
+  }
+
+  return headers;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // File type detection
 const getFileType = (filename: string): 'markdown' | 'pdf' => {
@@ -45,7 +73,10 @@ const getFileType = (filename: string): 'markdown' | 'pdf' => {
 export const checkHealth = async (providers = AVAILABLE_PROVIDERS): Promise<HealthCheckResponse> => {
   // Check each provider in parallel
   const healthChecks = providers.map(async (provider) => {
-    const response = await fetch(`${API_BASE_URL}/api/provider-health?provider=${provider}`);
+    const authHeaders = getAuthHeaders();
+    const response = await fetch(`${getApiBaseUrl()}/api/provider-health?provider=${provider}`, {
+      headers: authHeaders
+    });
     if (!response.ok) {
       return { provider, status: 'unavailable' };
     }
@@ -89,8 +120,9 @@ export const parseDocument = async (file: File): Promise<IndexTreeResponse> => {
   formData.append('if_add_node_summary', 'true');
   formData.append('if_add_node_text', 'true');
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
     method: 'POST',
+    headers: getAuthHeadersForFormData(),
     body: formData,
   });
 
@@ -152,11 +184,9 @@ export const chatWithDocument = async (
   console.log('History:', history);
   console.log('Request body size:', JSON.stringify(requestBody).length, 'bytes');
 
-  const response = await fetch(`${API_BASE_URL}/api/chat`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(requestBody),
   });
 
@@ -213,11 +243,12 @@ export const formatSourceInfo = (sources: SourceInfo[] | undefined): string => {
  */
 export const listDocuments = async (status?: ParseStatus): Promise<DocumentListResponse> => {
   const url = status
-    ? `${API_BASE_URL}/api/documents/?parse_status=${status}`
-    : `${API_BASE_URL}/api/documents/`;
+    ? `${getApiBaseUrl()}/api/documents/?parse_status=${status}`
+    : `${getApiBaseUrl()}/api/documents/`;
 
   const response = await fetch(url, {
     method: 'GET',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -245,8 +276,9 @@ export const listDocuments = async (status?: ParseStatus): Promise<DocumentListR
  * Get document details by ID
  */
 export const getDocument = async (id: string): Promise<Document> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${id}`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${id}`, {
     method: 'GET',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -264,8 +296,8 @@ export const getDocument = async (id: string): Promise<Document> => {
 export const getDocumentTree = async (id: string): Promise<DocumentTreeResponse> => {
   // Fetch both document metadata and tree in parallel
   const [docResponse, treeResponse] = await Promise.all([
-    fetch(`${API_BASE_URL}/api/documents/${id}`, { method: 'GET' }),
-    fetch(`${API_BASE_URL}/api/documents/${id}/tree`, { method: 'GET' })
+    fetch(`${getApiBaseUrl()}/api/documents/${id}`, { method: 'GET', headers: getAuthHeaders() }),
+    fetch(`${getApiBaseUrl()}/api/documents/${id}/tree`, { method: 'GET', headers: getAuthHeaders() })
   ]);
 
   // Check document metadata response
@@ -297,8 +329,9 @@ export const getDocumentTree = async (id: string): Promise<DocumentTreeResponse>
  * Delete document by ID
  */
 export const deleteDocument = async (id: string): Promise<DeleteDocumentResponse> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${id}`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${id}`, {
     method: 'DELETE',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -313,8 +346,9 @@ export const deleteDocument = async (id: string): Promise<DeleteDocumentResponse
  * Get global performance statistics (latest parse)
  */
 export const getGlobalPerformanceStats = async (): Promise<PerformanceStats | null> => {
-  const response = await fetch(`${API_BASE_URL}/api/performance/stats`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/performance/stats`, {
     method: 'GET',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -333,11 +367,9 @@ export const reparseDocument = async (
   model?: string,
   customPrompt?: string
 ): Promise<DocumentTreeResponse> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${id}/parse`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${id}/parse`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       model,
       custom_prompt: customPrompt?.trim(),
@@ -378,8 +410,9 @@ export const uploadDocument = async (file: File, customPrompt?: string): Promise
 
   console.log('Uploading file:', file.name, 'Size:', file.size);
 
-  const response = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/upload`, {
     method: 'POST',
+    headers: getAuthHeadersForFormData(),
     body: formData,
   });
 
@@ -452,8 +485,14 @@ export const transformToGalleryItems = (documents: Document[]): GalleryItem[] =>
     // Get filename without extension for title
     const filenameWithoutExt = doc.filename.replace(/\.[^/.]+$/, '');
 
-    // Determine category based on file type
-    const category = doc.file_type === 'pdf' ? 'PDF' : 'Markdown';
+    // Get category from doc.category field or default
+    const category = doc.category || '未分类';
+
+    // Parse tags
+    let tags: string[] = [];
+    if (doc.tags && Array.isArray(doc.tags)) {
+      tags = doc.tags;
+    }
 
     // Format date (created_at is ISO string)
     const date = new Date(doc.created_at).toLocaleDateString('en-US', {
@@ -463,12 +502,17 @@ export const transformToGalleryItems = (documents: Document[]): GalleryItem[] =>
     });
 
     // Create description based on parse status
-    const getDescription = (status: ParseStatus, fileSize: number): string => {
+    const getDescription = (status: ParseStatus, fileSize: number, category: string, tags: string[]): string => {
       const sizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+
+      if (status === 'completed') {
+        const tagStr = tags.length > 0 ? tags.join(' · ') : '';
+        return `${category}${tagStr ? ' · ' + tagStr : ''} • ${sizeMB} MB`;
+      }
+
       const statusText = {
         pending: 'Pending parsing',
         processing: 'Processing...',
-        completed: `Ready • ${sizeMB} MB`,
         failed: 'Parse failed'
       };
       return statusText[status];
@@ -479,8 +523,9 @@ export const transformToGalleryItems = (documents: Document[]): GalleryItem[] =>
       title: filenameWithoutExt,
       category,
       date,
-      description: getDescription(doc.parse_status, doc.file_size_bytes),
-      parseStatus: doc.parse_status
+      description: getDescription(doc.parse_status, doc.file_size_bytes, category, tags),
+      parseStatus: doc.parse_status,
+      tags
     };
   });
 };
@@ -548,8 +593,9 @@ export const getConversationHistory = async (documentId: string, limit: number =
   }>;
   count: number;
 }> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/conversations?limit=${limit}`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/conversations?limit=${limit}`, {
     method: 'GET',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -570,11 +616,9 @@ export const saveConversationMessage = async (
   sources?: SourceInfo[],
   debugPath?: string[]
 ): Promise<{ id: string; document_id: string; role: string; created: boolean }> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/conversations`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/conversations`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       role,
       content,
@@ -599,13 +643,41 @@ export const deleteConversationHistory = async (documentId: string): Promise<{
   deleted: number;
   message: string;
 }> => {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/conversations`, {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/conversations`, {
     method: 'DELETE',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail || `Failed to delete conversation history: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Categorize document using LLM
+ * Analyzes first page to determine category and tags
+ */
+export const categorizeDocument = async (id: string, force = false): Promise<{
+  document_id: string;
+  category: string;
+  tags: string[];
+  confidence: number;
+  reasoning: string;
+  provider: string;
+  model: string;
+  message?: string;
+}> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${id}/categorize?force=${force}`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Categorization failed: ${response.statusText}`);
   }
 
   return await response.json();

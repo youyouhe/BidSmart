@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Node, Message, ThinkingState, ChatMessage, TenderProject, TenderSection, WorkflowState, RewriteRequest, AIConfig, WritingLanguage } from './types';
-import { chatWithDocument, checkHealth, getDocumentTree, uploadDocumentWithWebSocket, getConversationHistory, saveConversationMessage } from './services/apiService';
+import { chatWithDocument, checkHealth, getDocumentTree, uploadDocumentWithWebSocket, getConversationHistory, saveConversationMessage, deleteConversationHistory, updateApiSettings } from './services/apiService';
 import { websocketManager } from './services/websocketService';
 import TreeView from './components/TreeView';
 import ChatInterface from './components/ChatInterface';
@@ -14,7 +14,8 @@ import OutlineGenerator from './components/OutlineGenerator';
 import ExportModal from './components/ExportModal';
 import DocumentViewer from './components/DocumentViewer';
 import ResizableDivider from './components/ResizableDivider';
-import { GitBranch, BookOpen, ArrowLeft, FileText, PenTool, ChevronsRight, ChevronsLeft, Download } from 'lucide-react';
+import SettingsModal, { loadSettings, type ApiSettings } from './components/SettingsModal';
+import { GitBranch, BookOpen, ArrowLeft, FileText, PenTool, ChevronsRight, ChevronsLeft, Download, Settings, Server } from 'lucide-react';
 import { useLanguage } from './contexts/LanguageContext';
 import { convertOutlineToSections, exportDocument as exportDoc } from './services/bidWriterService';
 
@@ -26,7 +27,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isReasoning, setIsReasoning] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('upload');
+  const [viewMode, setViewMode] = useState<ViewMode>('gallery');
 
   // UX States
   const [thinkingState, setThinkingState] = useState<ThinkingState>('idle');
@@ -52,6 +53,13 @@ function App() {
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [showExportModal, setShowExportModal] = useState(false);
   const bidEditorRef = useRef<any>(null);
+
+  // Settings state
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [apiSettings, setApiSettings] = useState<ApiSettings>(() => loadSettings());
+
+  // Document selector state
+  const [showDocumentSelector, setShowDocumentSelector] = useState(false);
 
   // Bid Writer panel widths
   const [bidLeftPanelWidth, setBidLeftPanelWidth] = useState(380);
@@ -97,6 +105,8 @@ function App() {
   }, []);
 
   // 1. Handle File Upload - Uses WebSocket for real-time status updates
+  const [newlyUploadedDocumentId, setNewlyUploadedDocumentId] = useState<string | null>(null);
+
   const handleUpload = async (file: File, customPrompt?: string) => {
     setIsUploading(true);
     try {
@@ -120,6 +130,9 @@ function App() {
 
       console.log('Upload response, document ID:', documentId);
 
+      // Store the newly uploaded document ID so Gallery can track it
+      setNewlyUploadedDocumentId(documentId);
+
       // Immediately switch to gallery view
       // The document will be processed in background and status updated via WebSocket
       setViewMode('gallery');
@@ -132,7 +145,12 @@ function App() {
     }
   };
 
-  // 2. Handle Gallery Selection - Only sets view mode
+  // 2. Handle Gallery Back - Clear newly uploaded document ID
+  const handleGalleryBack = () => {
+    setNewlyUploadedDocumentId(null);
+  };
+
+  // 3. Handle Gallery Selection - Only sets view mode
   const handleGallerySelect = (id: string) => {
     // The actual loading is handled by onLoadDocument in DocumentGallery
     // This just handles the UI transition
@@ -142,6 +160,8 @@ function App() {
   // Load document from gallery using real API
   const handleLoadGalleryDocument = async (id: string): Promise<void> => {
     setIsUploading(true);
+    // Clear newly uploaded document ID since user is leaving gallery
+    setNewlyUploadedDocumentId(null);
     try {
       const tree = await getDocumentTree(id);
       setTree(tree);
@@ -293,6 +313,26 @@ function App() {
     }
   }, [tree, messages, t, currentDocumentId]);
 
+  // Handle clearing conversation history
+  const handleClearHistory = async () => {
+    if (!currentDocumentId) return;
+
+    try {
+      await deleteConversationHistory(currentDocumentId);
+      // Clear messages, keeping only the init message
+      setMessages([{
+        id: 'init',
+        role: 'ai',
+        content: `你好！我是基于【${tree?.title || '文档'}】的智能助手。我可以帮你快速理解文档内容，回答相关问题，或帮你定位到具体章节。请随时提问！`,
+        timestamp: Date.now()
+      }]);
+      setHighlightedNodeIds([]);
+    } catch (e) {
+      console.error('Failed to clear conversation history:', e);
+      alert('清空对话历史失败，请重试');
+    }
+  };
+
   // ==================== Bid Writer Handlers ====================
 
   // Start bid writing mode with current document
@@ -415,18 +455,34 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Main Layout
+  // Handle settings save
+  const handleSettingsSave = (settings: ApiSettings) => {
+    console.log('Settings saved:', settings);
+    setApiSettings(settings);
+    updateApiSettings(settings);
+  };
+
+  // Main Layout - Gallery is now the home page
   if (!tree) {
-    if (viewMode === 'gallery') {
-      return (
+    return (
+      <>
         <DocumentGallery
-          onBack={() => setViewMode('upload')}
+          onBack={handleGalleryBack}
           onSelect={handleGallerySelect}
           onLoadDocument={handleLoadGalleryDocument}
+          onUpload={handleUpload}
+          onOpenApiSettings={() => setShowSettingsModal(true)}
+          newlyUploadedDocumentId={newlyUploadedDocumentId}
+          isUploading={isUploading}
         />
-      );
-    }
-    return <UploadZone onUpload={handleUpload} onOpenGallery={() => setViewMode('gallery')} isUploading={isUploading} />;
+        <SettingsModal
+          isOpen={showSettingsModal}
+          onClose={() => setShowSettingsModal(false)}
+          onSave={handleSettingsSave}
+          currentSettings={apiSettings}
+        />
+      </>
+    );
   }
 
   // Bid Writer Mode - Three Column Layout
@@ -456,6 +512,22 @@ function App() {
               style={{ width: `${bidLeftPanelWidth}px`, minWidth: '200px', maxWidth: '1000px' }}
             >
               <div className="h-14 border-b flex items-center px-3 bg-gray-50/50 shrink-0 gap-2">
+                {/* Switch Document Button */}
+                <button
+                  onClick={() => setShowDocumentSelector(true)}
+                  className="p-1.5 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                  title="切换文档"
+                >
+                  <FileText size={18} />
+                </button>
+
+                <div className="flex-1 min-w-0 flex items-center">
+                  <PenTool className="text-gray-400 mr-2 shrink-0" size={16} />
+                  <h1 className="font-semibold text-gray-700 text-sm truncate" title={tenderProject.title}>
+                    {tenderProject.title}
+                  </h1>
+                </div>
+
                 <button
                   onClick={() => {
                     setViewMode('chat');
@@ -466,12 +538,6 @@ function App() {
                 >
                   <ArrowLeft size={18} />
                 </button>
-                <div className="flex-1 min-w-0 flex items-center">
-                  <FileText className="text-gray-400 mr-2 shrink-0" size={16} />
-                  <h1 className="font-semibold text-gray-700 text-sm truncate" title={tenderProject.title}>
-                    {tenderProject.title}
-                  </h1>
-                </div>
               </div>
               <div className="flex-1 overflow-hidden">
                 <SectionBoard
@@ -574,6 +640,55 @@ function App() {
             onClose={() => setShowExportModal(false)}
           />
         )}
+
+        {/* Document Selector Modal */}
+        {showDocumentSelector && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[85vh] flex flex-col m-4">
+              {/* Modal Header */}
+              <div className="p-4 border-b flex items-center justify-between shrink-0">
+                <h2 className="text-lg font-bold text-gray-800">选择文档</h2>
+                <button
+                  onClick={() => setShowDocumentSelector(false)}
+                  className="p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Body - Embedded DocumentGallery */}
+              <div className="flex-1 overflow-auto">
+                <DocumentGallery
+                  onBack={() => setShowDocumentSelector(false)}
+                  onSelect={(id) => {
+                    handleLoadGalleryDocument(id).then(() => {
+                      setShowDocumentSelector(false);
+                    }).catch(() => {
+                      // Error handling is done in handleLoadGalleryDocument
+                    });
+                  }}
+                  onLoadDocument={handleLoadGalleryDocument}
+                  onUpload={handleUpload}
+                  onOpenApiSettings={() => {
+                    setShowDocumentSelector(false);
+                    setShowSettingsModal(true);
+                  }}
+                  newlyUploadedDocumentId={newlyUploadedDocumentId}
+                  isUploading={isUploading}
+                  embeddedMode={true}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Modal */}
+        <SettingsModal
+          isOpen={showSettingsModal}
+          onClose={() => setShowSettingsModal(false)}
+          onSave={handleSettingsSave}
+          currentSettings={apiSettings}
+        />
       </div>
     );
   }
@@ -589,6 +704,22 @@ function App() {
             style={{ width: `${leftPanelWidth}px`, minWidth: '200px', maxWidth: '1000px' }}
           >
             <div className="h-14 border-b flex items-center px-3 bg-gray-50/50 shrink-0 gap-2">
+              {/* Switch Document Button */}
+              <button
+                onClick={() => setShowDocumentSelector(true)}
+                className="p-1.5 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                title="切换文档"
+              >
+                <FileText size={18} />
+              </button>
+
+              <div className="flex-1 min-w-0 flex items-center">
+                <BookOpen className="text-gray-400 mr-2 shrink-0" size={16} />
+                <h1 className="font-semibold text-gray-700 text-sm truncate" title={tree.title}>
+                  {tree.title}
+                </h1>
+              </div>
+
               <button
                 onClick={handleCloseDocument}
                 className="p-1.5 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
@@ -596,12 +727,17 @@ function App() {
               >
                 <ArrowLeft size={18} />
               </button>
-              <div className="flex-1 min-w-0 flex items-center">
-                <BookOpen className="text-gray-400 mr-2 shrink-0" size={16} />
-                <h1 className="font-semibold text-gray-700 text-sm truncate" title={tree.title}>
-                  {tree.title}
-                </h1>
-              </div>
+
+              <button
+                onClick={() => {
+                  console.log('Settings modal opened');
+                  setShowSettingsModal(true);
+                }}
+                className="p-1.5 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                title="API设置"
+              >
+                <Server size={18} />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
               <div className="px-2">
@@ -668,6 +804,7 @@ function App() {
               // Trigger chat with document
               handleSendMessage(question);
             }}
+            onClearHistory={handleClearHistory}
             isReasoning={isReasoning}
             messages={messages}
           />
@@ -704,6 +841,55 @@ function App() {
           <ChevronsLeft size={16} />
         </button>
       )}
+
+      {/* Document Selector Modal */}
+      {showDocumentSelector && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[85vh] flex flex-col m-4">
+            {/* Modal Header */}
+            <div className="p-4 border-b flex items-center justify-between shrink-0">
+              <h2 className="text-lg font-bold text-gray-800">选择文档</h2>
+              <button
+                onClick={() => setShowDocumentSelector(false)}
+                className="p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body - Embedded DocumentGallery */}
+            <div className="flex-1 overflow-auto">
+              <DocumentGallery
+                onBack={() => setShowDocumentSelector(false)}
+                onSelect={(id) => {
+                  handleLoadGalleryDocument(id).then(() => {
+                    setShowDocumentSelector(false);
+                  }).catch(() => {
+                    // Error handling is done in handleLoadGalleryDocument
+                  });
+                }}
+                onLoadDocument={handleLoadGalleryDocument}
+                onUpload={handleUpload}
+                onOpenApiSettings={() => {
+                  setShowDocumentSelector(false);
+                  setShowSettingsModal(true);
+                }}
+                newlyUploadedDocumentId={newlyUploadedDocumentId}
+                isUploading={isUploading}
+                embeddedMode={true}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        onSave={handleSettingsSave}
+        currentSettings={apiSettings}
+      />
     </div>
   );
 }

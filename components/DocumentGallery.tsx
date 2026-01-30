@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Search, FileText, Calendar, Filter, Trash2, RefreshCw, BarChart3, Settings, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Search, FileText, Calendar, Filter, Trash2, RefreshCw, BarChart3, Settings, ChevronDown, ChevronUp, Server, UploadCloud } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
-import { listDocuments, transformToGalleryItems, deleteDocument, reparseDocument, getDocument } from '../services/apiService';
+import { listDocuments, transformToGalleryItems, deleteDocument, reparseDocument, getDocument, categorizeDocument } from '../services/apiService';
 import { websocketManager, WebSocketCallbacks, StatusUpdateMessage } from '../services/websocketService';
 import { GalleryItem, ParseStatus, PerformanceStats } from '../types';
 import LanguageSwitcher from './LanguageSwitcher';
@@ -21,17 +21,32 @@ interface DocumentGalleryProps {
   onBack: () => void;
   onSelect: (id: string) => void;
   onLoadDocument: (id: string) => Promise<void>;
+  onUpload?: (file: File, customPrompt?: string) => void;
+  onOpenApiSettings?: () => void;
+  newlyUploadedDocumentId?: string | null;
+  isUploading?: boolean;
+  embeddedMode?: boolean;
 }
 
-const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onLoadDocument }) => {
+const DocumentGallery: React.FC<DocumentGalleryProps> = ({
+  onBack,
+  onSelect,
+  onLoadDocument,
+  onUpload,
+  onOpenApiSettings,
+  newlyUploadedDocumentId,
+  isUploading = false,
+  embeddedMode = false
+}) => {
   const { t } = useLanguage();
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<ParseStatus | 'all'>('all');
   const [loadingItemId, setLoadingItemId] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   // Performance modal state
   const [performanceModalOpen, setPerformanceModalOpen] = useState(false);
@@ -43,8 +58,19 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
   const [customPrompt, setCustomPrompt] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Document progress tracking
   const [documentProgress, setDocumentProgress] = useState<Record<string, DocumentProgress>>({});
+
+  // Category editing state
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editedCategory, setEditedCategory] = useState('');
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+  const [hoverStartTime, setHoverStartTime] = useState<number>(0);
+  const [showEditPrompt, setShowEditPrompt] = useState<string | null>(null);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // WebSocket connection tracking
   const webSocketConnectionsRef = useRef<Set<string>>(new Set());
@@ -57,39 +83,64 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
         websocketManager.disconnect(docId);
       });
       webSocketConnectionsRef.current.clear();
+      // Clear hover timeout
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
     };
   }, []);
 
   /**
    * Subscribe to document status updates via WebSocket
+   * @param force - Force re-subscription even if already subscribed
    */
-  const subscribeToDocumentStatus = (documentId: string) => {
-    // Avoid duplicate subscriptions
-    if (webSocketConnectionsRef.current.has(documentId)) {
+  const subscribeToDocumentStatus = (documentId: string, force = false) => {
+    console.log('[DocumentGallery] subscribeToDocumentStatus called with:', { documentId, force, hasInRef: webSocketConnectionsRef.current.has(documentId) });
+
+    // Avoid duplicate subscriptions unless forced
+    if (!force && webSocketConnectionsRef.current.has(documentId)) {
+      console.log('[DocumentGallery] Already subscribed to', documentId, '- skipping (use force=true to override)');
       return;
+    }
+
+    // If forcing, disconnect existing connection first
+    if (force && webSocketConnectionsRef.current.has(documentId)) {
+      console.log('[DocumentGallery] Force re-subscribing to', documentId, '- disconnecting existing connection');
+      websocketManager.disconnect(documentId);
+      webSocketConnectionsRef.current.delete(documentId);
     }
 
     const callbacks: WebSocketCallbacks = {
       onStatus: (update: StatusUpdateMessage) => {
-        console.log('[DocumentGallery] WebSocket status update:', { documentId, update });
+        console.log('[DocumentGallery] WebSocket status update:', { subscribedDocId: documentId, update });
+        console.log('[DocumentGallery] update.document_id:', update.document_id);
+        console.log('[DocumentGallery] update.progress:', update.progress);
+        console.log('[DocumentGallery] update.status:', update.status);
+
+        // Use update.document_id to ensure we update the correct document
+        const targetDocId = update.document_id;
 
         // Update progress tracking for processing status
         if (update.status === 'processing') {
-          setDocumentProgress(prev => ({
-            ...prev,
-            [documentId]: {
-              documentId,
-              progress: update.progress ?? 0,
-              stage: update.metadata?.stage || 'Processing...',
-              message: update.metadata?.message || update.metadata?.stage || 'Processing...',
-              metadata: update.metadata
-            }
-          }));
+          setDocumentProgress(prev => {
+            const newProgress = {
+              ...prev,
+              [targetDocId]: {
+                documentId: targetDocId,
+                progress: update.progress ?? 0,
+                stage: update.metadata?.stage || 'Processing...',
+                message: update.metadata?.message || update.metadata?.stage || 'Processing...',
+                metadata: update.metadata
+              }
+            };
+            console.log('[DocumentGallery] Updated documentProgress for', targetDocId, 'progress:', update.progress);
+            return newProgress;
+          });
         } else if (update.status === 'completed' || update.status === 'failed') {
           // Remove progress when done
           setDocumentProgress(prev => {
             const newProgress = { ...prev };
-            delete newProgress[documentId];
+            delete newProgress[targetDocId];
             return newProgress;
           });
         }
@@ -97,7 +148,7 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
         // Update the document in the gallery items list
         setItems(prevItems =>
           prevItems.map(item => {
-            if (item.id === documentId) {
+            if (item.id === targetDocId) {
               // Get the original document to calculate file size
               const doc = prevItems.find(i => i.id === documentId);
               const fileSize = doc?.description.match(/[\d.]+/)?.[0] ? parseFloat(doc.description.match(/[\d.]+/)[0]!) * 1024 * 1024 : 0;
@@ -133,6 +184,31 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
 
         // If parsing is complete, refresh the full list after a short delay
         if (update.status === 'completed' || update.status === 'failed') {
+          // Trigger categorization after completion
+          if (update.status === 'completed') {
+            categorizeDocument(targetDocId)
+              .then(result => {
+                console.log('[DocumentGallery] Categorized:', result);
+                // Update gallery item with category/tags
+                setItems(prevItems =>
+                  prevItems.map(item => {
+                    if (item.id === targetDocId) {
+                      return {
+                        ...item,
+                        category: result.category,
+                        tags: result.tags,
+                        description: `${item.description.split('•')[0].trim()} • ${result.category}${result.tags && result.tags.length > 0 ? ' · ' + result.tags.join(' · ') : ''}`
+                      };
+                    }
+                    return item;
+                  })
+                );
+              })
+              .catch(err => {
+                console.error('[DocumentGallery] Categorization failed:', err);
+              });
+          }
+
           setTimeout(() => {
             fetchDocuments();
           }, 2000);
@@ -205,7 +281,188 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
     fetchDocuments();
   }, [statusFilter]);
 
+  // Handle newly uploaded document - immediately subscribe to WebSocket and start polling
+  useEffect(() => {
+    if (newlyUploadedDocumentId) {
+      console.log('[DocumentGallery] Newly uploaded document:', newlyUploadedDocumentId);
+
+      // Initialize progress for the newly uploaded document
+      setDocumentProgress(prev => {
+        const updated = {
+          ...prev,
+          [newlyUploadedDocumentId]: {
+            documentId: newlyUploadedDocumentId,
+            progress: 0,
+            stage: '上传中...',
+            message: '正在上传文档...',
+          }
+        };
+        console.log('[DocumentGallery] Initialized progress for', newlyUploadedDocumentId, updated);
+        return updated;
+      });
+
+      // Subscribe to WebSocket updates immediately (force to take over from App.tsx connection)
+      console.log('[DocumentGallery] Calling subscribeToDocumentStatus for', newlyUploadedDocumentId, 'with force=true');
+      subscribeToDocumentStatus(newlyUploadedDocumentId, true);
+
+      // Also start polling as a fallback to ensure we get progress updates
+      const pollInterval = setInterval(async () => {
+        try {
+          const doc = await getDocument(newlyUploadedDocumentId);
+
+          if (doc.parse_status === 'processing') {
+            // Try to get progress from metadata
+            const progress = doc.metadata?.progress || 0;
+            const stage = doc.metadata?.stage || 'Processing...';
+
+            setDocumentProgress(prev => ({
+              ...prev,
+              [newlyUploadedDocumentId]: {
+                documentId: newlyUploadedDocumentId,
+                progress,
+                stage,
+                message: stage,
+                metadata: doc.metadata
+              }
+            }));
+            console.log('[DocumentGallery] Polling: progress =', progress);
+          } else if (doc.parse_status === 'completed' || doc.parse_status === 'failed') {
+            // Clear polling interval
+            clearInterval(pollInterval);
+            setDocumentProgress(prev => {
+              const newProgress = { ...prev };
+              delete newProgress[newlyUploadedDocumentId];
+              return newProgress;
+            });
+            // Refresh document list to show final status
+            fetchDocuments();
+          }
+        } catch (err) {
+          console.error('[DocumentGallery] Polling error:', err);
+        }
+      }, 10000); // Poll every 10 seconds
+
+      // Refresh documents after a short delay to get the document in the list
+      setTimeout(() => {
+        fetchDocuments();
+      }, 1000);
+
+      // Cleanup function
+      return () => {
+        clearInterval(pollInterval);
+      };
+    }
+  }, [newlyUploadedDocumentId]);
+
+  // Handler: Double-click to re-categorize
+  const handleDoubleClickCategory = async (e: React.MouseEvent, itemId: string) => {
+    e.stopPropagation();
+    console.log('[DocumentGallery] Double-click to re-categorize:', itemId);
+
+    try {
+      const result = await categorizeDocument(itemId, true); // force=true
+      console.log('[DocumentGallery] Re-categorized:', result);
+
+      // Update gallery item with new category/tags
+      setItems(prevItems =>
+        prevItems.map(item => {
+          if (item.id === itemId) {
+            return {
+              ...item,
+              category: result.category,
+              tags: result.tags,
+              description: `${item.description.split('•')[0].trim()} • ${result.category}${result.tags && result.tags.length > 0 ? ' · ' + result.tags.join(' · ') : ''}`
+            };
+          }
+          return item;
+        })
+      );
+    } catch (err) {
+      console.error('[DocumentGallery] Re-categorization failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to re-categorize document');
+    }
+  };
+
+  // Handler: Mouse enter for hover detection
+  const handleMouseEnterCategory = (itemId: string) => {
+    setHoveredItemId(itemId);
+    setHoverStartTime(Date.now());
+
+    // Show edit prompt after 2 seconds of hovering
+    hoverTimeoutRef.current = setTimeout(() => {
+      if (hoveredItemId === itemId) {
+        setShowEditPrompt(itemId);
+      }
+    }, 2000);
+  };
+
+  // Handler: Mouse leave
+  const handleMouseLeaveCategory = () => {
+    setHoveredItemId(null);
+    setHoverStartTime(0);
+    setShowEditPrompt(null);
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+  };
+
+  // Handler: Start editing category
+  const handleStartEditCategory = (e: React.MouseEvent, itemId: string, currentCategory: string) => {
+    e.stopPropagation();
+    setEditingCategoryId(itemId);
+    setEditedCategory(currentCategory);
+    setShowEditPrompt(null);
+  };
+
+  // Handler: Save edited category
+  const handleSaveEditedCategory = async (itemId: string) => {
+    if (!editedCategory.trim()) return;
+
+    try {
+      // Get the document from the API to preserve existing tags
+      const doc = await getDocument(itemId);
+
+      // Update via API - we need to call the categorize endpoint with custom values
+      // Since we don't have a direct update endpoint, we'll update local state
+      const newCategory = editedCategory.trim();
+
+      setItems(prevItems =>
+        prevItems.map(item => {
+          if (item.id === itemId) {
+            return {
+              ...item,
+              category: newCategory,
+              description: `${item.description.split('•')[0].trim()} • ${newCategory}${item.tags && item.tags.length > 0 ? ' · ' + item.tags.join(' · ') : ''}`
+            };
+          }
+          return item;
+        })
+      );
+
+      // Note: This only updates local state. To persist, we'd need an update endpoint
+      console.log('[DocumentGallery] Category edited locally:', { itemId, newCategory });
+    } catch (err) {
+      console.error('[DocumentGallery] Failed to edit category:', err);
+    } finally {
+      setEditingCategoryId(null);
+      setEditedCategory('');
+    }
+  };
+
+  // Handler: Cancel editing
+  const handleCancelEditCategory = () => {
+    setEditingCategoryId(null);
+    setEditedCategory('');
+  };
+
   const categories = ['All', ...Array.from(new Set(items.map(i => i.category)))];
+  const allCategoriesAndTags = ['all', ...Array.from(new Set(
+    items.flatMap(item => [
+      item.category,
+      ...(item.tags || [])
+    ]).filter(Boolean)
+  ))];
 
   const handleSelectItem = async (id: string) => {
     setLoadingItemId(id);
@@ -272,45 +529,90 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
     }
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0] && onUpload) {
+      onUpload(e.target.files[0], customPrompt);
+    }
+  };
+
   const filteredItems = items.filter(item => {
-    const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-    const matchesSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesStatus = statusFilter === 'all' || item.parseStatus === statusFilter;
+
+    // Category/tag filter
+    const matchesCategory = categoryFilter === 'all' ||
+                           item.category === categoryFilter ||
+                           (item.tags && item.tags.includes(categoryFilter));
+
+    const matchesSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           item.description.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
+
+    return matchesStatus && matchesCategory && matchesSearch;
   });
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <div className="h-16 bg-white border-b border-gray-200 px-6 flex items-center justify-between shrink-0">
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={onBack}
-            className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="text-lg font-semibold text-gray-800">{t('gallery.title')}</h1>
-        </div>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className={clsx(
-              "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-              settingsOpen ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-100"
+    <div className={embeddedMode ? "flex flex-col h-full bg-gray-50" : "flex flex-col h-screen bg-gray-50"}>
+      {/* Header - Only show if not in embedded mode */}
+      {!embeddedMode && (
+        <div className="h-16 bg-white border-b border-gray-200 px-6 flex items-center justify-between shrink-0">
+          <div className="flex items-center space-x-4">
+            <h1 className="text-lg font-semibold text-gray-800">{t('gallery.title')}</h1>
+          </div>
+          <div className="flex items-center space-x-3">
+            {/* Upload Button */}
+            {onUpload && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="上传文档"
+              >
+                {isUploading ? (
+                  <RefreshCw size={16} className="animate-spin" />
+                ) : (
+                  <UploadCloud size={16} />
+                )}
+                <span>{isUploading ? '上传中...' : '上传文档'}</span>
+              </button>
             )}
-            title="Parse settings"
-          >
-            <Settings size={16} />
-            <span>Settings</span>
-            {settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-          <LanguageSwitcher />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.md"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <button
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              className={clsx(
+                "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                settingsOpen ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-100"
+              )}
+              title="Parse settings"
+            >
+              <Settings size={16} />
+              <span>Prompt</span>
+              {settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+            {onOpenApiSettings && (
+              <button
+                onClick={() => {
+                  console.log('API settings button clicked');
+                  onOpenApiSettings();
+                }}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-100 border border-blue-200 transition-colors"
+                title="API settings"
+              >
+                <Server size={16} />
+                <span>API</span>
+              </button>
+            )}
+            <LanguageSwitcher />
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Settings Panel */}
-      {settingsOpen && (
+      {/* Settings Panel - Only show if not in embedded mode */}
+      {!embeddedMode && settingsOpen && (
         <div className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
           <div className="max-w-3xl">
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -407,6 +709,38 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
                  </button>
                ))}
              </div>
+
+             {/* Category/Tag Filter */}
+             <div>
+               <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">分类与标签</div>
+               {allCategoriesAndTags.map(cat => {
+                 const isTag = items.some(item =>
+                   item.tags && item.tags.includes(cat) && item.category !== cat
+                 );
+                 const count = items.filter(item =>
+                   item.category === cat || (item.tags && item.tags.includes(cat))
+                 ).length;
+
+                 return (
+                   <button
+                     key={cat}
+                     onClick={() => setCategoryFilter(cat)}
+                     className={clsx(
+                       "w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-between",
+                       categoryFilter === cat
+                         ? "bg-blue-50 text-blue-700"
+                         : "text-gray-600 hover:bg-gray-50",
+                       isTag && "pl-6"  // Indent tags
+                     )}
+                   >
+                     <span className={isTag ? "text-gray-500" : ""}>{cat}</span>
+                     <span className="text-xs bg-gray-100 text-gray-500 py-0.5 px-2 rounded-full">
+                       {count}
+                     </span>
+                   </button>
+                 );
+               })}
+             </div>
            </div>
         </div>
 
@@ -454,17 +788,87 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
                        )}>
                          <FileText size={20} />
                        </div>
-                       <div className="flex items-center gap-2">
-                         <span className={clsx(
-                           "text-xs font-medium px-2 py-1 rounded-md",
-                           item.parseStatus === 'failed'
-                             ? "bg-red-100 text-red-600"
-                             : item.parseStatus === 'processing'
-                               ? "bg-blue-100 text-blue-600"
-                               : "bg-gray-100 text-gray-600"
-                         )}>
-                           {item.category}
-                         </span>
+                       <div className="flex items-center gap-2 flex-wrap">
+                         {/* Category Badge - with hover edit for uncategorized docs */}
+                         {editingCategoryId === item.id ? (
+                           // Edit mode input
+                           <div className="flex items-center gap-1">
+                             <input
+                               type="text"
+                               value={editedCategory}
+                               onChange={(e) => setEditedCategory(e.target.value)}
+                               onKeyDown={(e) => {
+                                 if (e.key === 'Enter') {
+                                   handleSaveEditedCategory(item.id);
+                                 } else if (e.key === 'Escape') {
+                                   handleCancelEditCategory();
+                                 }
+                               }}
+                               onClick={(e) => e.stopPropagation()}
+                               className="text-xs px-2 py-1 rounded-md border border-blue-300 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                               autoFocus
+                             />
+                             <button
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 handleSaveEditedCategory(item.id);
+                               }}
+                               className="p-0.5 hover:bg-green-100 rounded text-green-600"
+                               title="保存"
+                             >
+                               ✓
+                             </button>
+                             <button
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 handleCancelEditCategory();
+                               }}
+                               className="p-0.5 hover:bg-red-100 rounded text-red-600"
+                               title="取消"
+                             >
+                               ✕
+                             </button>
+                           </div>
+                         ) : (
+                           // Display mode with hover prompt
+                           <div className="relative">
+                             <span
+                               className={clsx(
+                                 "text-xs font-medium px-2 py-1 rounded-md cursor-pointer transition-colors",
+                                 item.category === '未分类'
+                                   ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+                                   : "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                               )}
+                               onDoubleClick={(e) => handleDoubleClickCategory(e, item.id)}
+                               onMouseEnter={() => item.category === '未分类' && handleMouseEnterCategory(item.id)}
+                               onMouseLeave={handleMouseLeaveCategory}
+                               title={item.category === '未分类' ? "双击重新分类 · 悬停2秒编辑" : "双击重新分类"}
+                             >
+                               {item.category}
+                             </span>
+
+                             {/* Hover edit prompt */}
+                             {showEditPrompt === item.id && item.category === '未分类' && (
+                               <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-blue-200 rounded-lg shadow-lg p-2 min-w-[140px]">
+                                 <p className="text-xs text-gray-600 mb-2">手动编辑分类:</p>
+                                 <button
+                                   onClick={(e) => handleStartEditCategory(e, item.id, item.category)}
+                                   className="w-full text-xs px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition-colors"
+                                 >
+                                   点击编辑
+                                 </button>
+                               </div>
+                             )}
+                           </div>
+                         )}
+
+                         {/* Tags */}
+                         {item.tags && item.tags.map(tag => (
+                           <span key={tag} className="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600">
+                             {tag}
+                           </span>
+                         ))}
+
                          {item.parseStatus === 'completed' && (
                            <button
                              onClick={(e) => handleViewPerformance(e, item.id, item.title)}

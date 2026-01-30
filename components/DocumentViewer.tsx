@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { FileText, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react';
 import { Node } from '../types';
 import * as pdfjsLib from 'pdfjs-dist';
+import { getApiBaseUrl } from '../services/apiService';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -58,8 +59,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       try {
         setLoading(true);
-        // Use the existing download API endpoint
-        const pdfUrl = `/api/documents/${documentId}/download`;
+        // Use the existing download API endpoint with configured base URL
+        const pdfUrl = `${getApiBaseUrl()}/api/documents/${documentId}/download`;
+        console.log('[DocumentViewer] Loading PDF from:', pdfUrl);
         const response = await fetch(pdfUrl);
 
         if (!response.ok) {

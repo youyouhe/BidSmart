@@ -128,6 +128,14 @@ export interface Document {
   created_at: string; // ISO datetime string
   updated_at: string; // ISO datetime string
   performance?: PerformanceStats | null; // Performance statistics from latest parse
+  metadata?: {
+    progress?: number;
+    stage?: string;
+    message?: string;
+    [key: string]: any;
+  };
+  category?: string | null; // Document category
+  tags?: string[]; // Document tags
 }
 
 export interface DocumentListResponse {
@@ -163,10 +171,11 @@ export interface UploadDocumentResponse {
 export interface GalleryItem {
   id: string;
   title: string;
-  category: string;
+  category: string; // Document category (e.g., "教育招标", "政府采购")
   date: string;
   description: string;
   parseStatus: ParseStatus;
+  tags?: string[]; // Document tags
 }
 
 // ====================

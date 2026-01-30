@@ -8,6 +8,8 @@
  * - Graceful error handling
  */
 
+import { loadSettings, type ApiSettings } from '../components/SettingsModal';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -58,7 +60,7 @@ export interface WebSocketCallbacks {
 // DocumentWebSocket Class
 // =============================================================================
 
-class DocumentWebSocket {
+export class DocumentWebSocket {
   private ws: WebSocket | null = null;
   private documentId: string;
   private url: string;
@@ -70,6 +72,7 @@ class DocumentWebSocket {
   private heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
   private heartbeatMissed = 0;
   private isIntentionalClose = false;
+  private settings: ApiSettings;
 
   // Constants
   private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
@@ -79,11 +82,20 @@ class DocumentWebSocket {
   constructor(documentId: string, callbacks: WebSocketCallbacks) {
     this.documentId = documentId;
     this.callbacks = callbacks;
+    this.settings = loadSettings();
 
-    // Build WebSocket URL from current location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    this.url = `${protocol}//${host}/ws/documents/${documentId}?timeout=300`;
+    // Build WebSocket URL from configured endpoint
+    const endpoint = this.settings.endpoint.trim();
+    const url = new URL(endpoint);
+    const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+
+    // Build WebSocket URL with token if available
+    let wsUrl = `${protocol}//${url.host}/ws/documents/${documentId}?timeout=300`;
+    if (this.settings.token && this.settings.token.trim()) {
+      wsUrl += `&token=${encodeURIComponent(this.settings.token.trim())}`;
+    }
+
+    this.url = wsUrl;
   }
 
   /**
@@ -296,6 +308,15 @@ class DocumentWebSocket {
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
   }
+
+  /**
+   * Update callbacks for this connection
+   * This allows a new subscriber to take over the callbacks
+   */
+  updateCallbacks(newCallbacks: WebSocketCallbacks): void {
+    this.callbacks = newCallbacks;
+    console.log(`[WebSocket] Updated callbacks for ${this.documentId}`);
+  }
 }
 
 // =============================================================================
@@ -307,6 +328,7 @@ class WebSocketConnectionManager {
 
   /**
    * Get or create a WebSocket connection for a document
+   * Always updates callbacks to the latest provided
    */
   getConnection(documentId: string, callbacks: WebSocketCallbacks): DocumentWebSocket {
     let connection = this.connections.get(documentId);
@@ -315,6 +337,9 @@ class WebSocketConnectionManager {
       console.log(`[WebSocketManager] Creating new connection for ${documentId}`);
       connection = new DocumentWebSocket(documentId, callbacks);
       this.connections.set(documentId, connection);
+    } else {
+      // Update callbacks for existing connection so new subscriber receives updates
+      connection.updateCallbacks(callbacks);
     }
 
     return connection;

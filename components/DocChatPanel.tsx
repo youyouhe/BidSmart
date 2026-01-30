@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles } from 'lucide-react';
+import { Send, Sparkles, Trash2 } from 'lucide-react';
 import { Node, Message } from '../types';
 
 interface DocChatPanelProps {
   documentTree: Node;
   onSendMessage?: (question: string) => void;
+  onClearHistory?: () => void;
   isReasoning?: boolean;
   messages?: Message[];
 }
@@ -12,11 +13,21 @@ interface DocChatPanelProps {
 const DocChatPanel: React.FC<DocChatPanelProps> = ({
   documentTree,
   onSendMessage,
+  onClearHistory,
   isReasoning = false,
   messages = []
 }) => {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Debug: Log when component renders
+  useEffect(() => {
+    console.log('[DocChatPanel] Rendered with:', {
+      hasOnClearHistory: !!onClearHistory,
+      messagesCount: messages.length,
+      documentTitle: documentTree.title
+    });
+  }, [onClearHistory, messages.length, documentTree.title]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -34,14 +45,38 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
     }
   };
 
+  const handleClear = () => {
+    console.log('[DocChatPanel] handleClear called, messages:', messages);
+    if (onClearHistory) {
+      if (confirm('确定要清空对话历史吗？')) {
+        onClearHistory();
+      }
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-white border-l border-gray-200 w-full min-w-0">
       {/* Header */}
       <div className="p-4 border-b border-gray-200 bg-white">
-        <h2 className="text-gray-800 font-bold flex items-center gap-2">
-          <Sparkles size={18} className="text-blue-600" />
-          文档助手
-        </h2>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {onClearHistory ? (
+              <button
+                onClick={handleClear}
+                disabled={isReasoning}
+                className="flex items-center gap-1 px-2 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="清空对话历史"
+              >
+                <Trash2 size={14} />
+                <span>清空</span>
+              </button>
+            ) : null}
+            <h2 className="text-gray-800 font-bold flex items-center gap-2">
+              <Sparkles size={18} className="text-blue-600" />
+              文档助手
+            </h2>
+          </div>
+        </div>
         <div className="text-xs text-gray-500 mt-2 flex items-center gap-2">
           <span className="flex items-center gap-1">
             <span className={`w-2 h-2 rounded-full inline-block ${

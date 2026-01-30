@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UploadCloud, FileText, Loader2, LayoutGrid, Settings, ChevronDown, ChevronUp } from 'lucide-react';
+import { UploadCloud, FileText, Loader2, LayoutGrid, Settings, ChevronDown, ChevronUp, Server } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 
@@ -7,9 +7,10 @@ interface UploadZoneProps {
   onUpload: (file: File, customPrompt?: string) => void;
   onOpenGallery: () => void;
   isUploading: boolean;
+  onOpenApiSettings?: () => void;
 }
 
-const UploadZone: React.FC<UploadZoneProps> = ({ onUpload, onOpenGallery, isUploading }) => {
+const UploadZone: React.FC<UploadZoneProps> = ({ onUpload, onOpenGallery, isUploading, onOpenApiSettings }) => {
   const { t } = useLanguage();
   const [customPrompt, setCustomPrompt] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -29,9 +30,22 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onUpload, onOpenGallery, isUplo
           title="Parse settings"
         >
           <Settings size={16} />
-          <span>Settings</span>
+          <span>Prompt</span>
           {settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
+        {onOpenApiSettings && (
+          <button
+            onClick={() => {
+              console.log('API settings button clicked');
+              onOpenApiSettings();
+            }}
+            className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-100 border border-blue-200 transition-colors"
+            title="API settings"
+          >
+            <Server size={16} />
+            <span>API</span>
+          </button>
+        )}
         <LanguageSwitcher />
       </div>
 
