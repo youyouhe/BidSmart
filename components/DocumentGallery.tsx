@@ -839,6 +839,7 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
                                    ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
                                    : "bg-blue-100 text-blue-700 hover:bg-blue-200"
                                )}
+                               onClick={(e) => e.stopPropagation()}
                                onDoubleClick={(e) => handleDoubleClickCategory(e, item.id)}
                                onMouseEnter={() => item.category === '未分类' && handleMouseEnterCategory(item.id)}
                                onMouseLeave={handleMouseLeaveCategory}
