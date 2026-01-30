@@ -1,0 +1,3 @@
+[submodule "lib/docmind-ai"]
+	path = lib/docmind-ai
+	url = https://github.com/youyouhe/docmind-ai.git

@@ -8,9 +8,10 @@ interface TreeViewProps {
   node: Node;
   activeNodeIds?: string[];
   depth?: number;
+  onNodeClick?: (nodeId: string) => void;
 }
 
-const TreeView: React.FC<TreeViewProps> = ({ node, activeNodeIds = [], depth = 0 }) => {
+const TreeView: React.FC<TreeViewProps> = ({ node, activeNodeIds = [], depth = 0, onNodeClick }) => {
   const [isOpen, setIsOpen] = useState(depth < 1); // Open root and first level by default
   const hasChildren = node.children && node.children.length > 0;
   
@@ -30,15 +31,18 @@ const TreeView: React.FC<TreeViewProps> = ({ node, activeNodeIds = [], depth = 0
   const toggleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsOpen(!isOpen);
+    if (onNodeClick) {
+      onNodeClick(node.id);
+    }
   };
 
   return (
     <div className="select-none">
-      <div 
+      <div
         className={twMerge(
           "flex items-center py-1.5 px-2 cursor-pointer transition-colors duration-200 rounded-md mx-2",
-          isActive 
-            ? "bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-300" 
+          isActive
+            ? "bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-300"
             : "hover:bg-gray-100 text-gray-700"
         )}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
@@ -72,11 +76,12 @@ const TreeView: React.FC<TreeViewProps> = ({ node, activeNodeIds = [], depth = 0
       {hasChildren && isOpen && (
         <div className="border-l border-gray-200 ml-5">
           {node.children.map((child) => (
-            <TreeView 
-              key={child.id} 
-              node={child} 
-              activeNodeIds={activeNodeIds} 
-              depth={depth + 1} 
+            <TreeView
+              key={child.id}
+              node={child}
+              activeNodeIds={activeNodeIds}
+              depth={depth + 1}
+              onNodeClick={onNodeClick}
             />
           ))}
         </div>

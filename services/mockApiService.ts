@@ -1,9 +1,7 @@
 import { IndexTreeResponse, ChatRequest, ChatResponse } from '../types';
 import { MOCK_TREE_DATA, MOCK_ANSWERS, GALLERY_ITEMS, GalleryItem } from '../constants';
 
-const DELAY_MS = 800;
-
-export const parseDocument = async (file: File): Promise<IndexTreeResponse> => {
+export const parseDocument = async (_file: File): Promise<IndexTreeResponse> => {
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve({
@@ -18,7 +16,7 @@ export const fetchGalleryItems = async (): Promise<GalleryItem[]> => {
   return new Promise((resolve) => {
     setTimeout(() => {
       resolve(GALLERY_ITEMS);
-    }, 500); 
+    }, 500);
   });
 };
 
@@ -26,7 +24,7 @@ export const loadGalleryDocument = async (id: string): Promise<IndexTreeResponse
   return new Promise((resolve) => {
     const item = GALLERY_ITEMS.find(g => g.id === id);
     const title = item ? item.title : MOCK_TREE_DATA.title;
-    
+
     // Clone tree to modify title
     const treeWithTitle = { ...MOCK_TREE_DATA, title: title };
 
@@ -35,7 +33,7 @@ export const loadGalleryDocument = async (id: string): Promise<IndexTreeResponse
         tree: treeWithTitle,
         stats: { total_nodes: 15 }
       });
-    }, 1000); 
+    }, 1000);
   });
 };
 

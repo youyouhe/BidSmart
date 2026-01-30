@@ -135,13 +135,14 @@ export const parseDocument = async (file: File): Promise<IndexTreeResponse> => {
 export const chatWithDocument = async (
   question: string,
   tree: Node,
-  history?: ChatMessage[]
+  history?: ChatMessage[],
+  documentId?: string
 ): Promise<ChatResponse> => {
   const requestBody = {
     question,
     tree, // Send full tree structure
     history, // Include conversation history for context
-    document_id: tree.id, // Include document_id for dynamic PDF page loading
+    document_id: documentId || tree.id, // Prioritize documentId, fallback to tree.id
   };
 
   // Log the request payload for debugging
@@ -525,4 +526,87 @@ export const uploadDocumentWithWebSocket = async (
     documentId: uploadResponse.id,
     websocket
   };
+};
+
+// =============================================================================
+// Conversation History API Functions
+// =============================================================================
+
+/**
+ * Get conversation history for a document
+ */
+export const getConversationHistory = async (documentId: string, limit: number = 100): Promise<{
+  document_id: string;
+  messages: Array<{
+    id: string;
+    document_id: string;
+    role: string;
+    content: string;
+    created_at: string;
+    sources?: string;
+    debug_path?: string;
+  }>;
+  count: number;
+}> => {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/conversations?limit=${limit}`, {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to get conversation history: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Save a conversation message
+ */
+export const saveConversationMessage = async (
+  documentId: string,
+  role: 'user' | 'assistant',
+  content: string,
+  sources?: SourceInfo[],
+  debugPath?: string[]
+): Promise<{ id: string; document_id: string; role: string; created: boolean }> => {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/conversations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      role,
+      content,
+      sources,
+      debug_path: debugPath,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to save message: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Delete all conversation history for a document
+ */
+export const deleteConversationHistory = async (documentId: string): Promise<{
+  document_id: string;
+  deleted: number;
+  message: string;
+}> => {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${documentId}/conversations`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to delete conversation history: ${response.statusText}`);
+  }
+
+  return await response.json();
 };

@@ -36,6 +36,7 @@ const translations = {
     "gallery.back": "Back to Upload",
     "gallery.select": "Open Document",
     "gallery.category.all": "All",
+    "gallery.search": "Search...",
     "gallery.no_results": "No documents found."
   },
   zh: {
@@ -71,6 +72,7 @@ const translations = {
     "gallery.back": "返回上传",
     "gallery.select": "打开文档",
     "gallery.category.all": "全部",
+    "gallery.search": "搜索...",
     "gallery.no_results": "未找到文档。"
   }
 };

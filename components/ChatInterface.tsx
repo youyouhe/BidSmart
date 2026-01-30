@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Loader2, Sparkles, PenTool } from 'lucide-react';
 import { Message, ThinkingState } from '../types';
 import { clsx } from 'clsx';
 import ReactMarkdown from 'react-markdown';
@@ -12,14 +12,16 @@ interface ChatInterfaceProps {
   isReasoning: boolean;
   thinkingState: ThinkingState;
   thinkingLog: string[];
+  onBidWriterStart?: () => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  messages, 
-  onSendMessage, 
+const ChatInterface: React.FC<ChatInterfaceProps> = ({
+  messages,
+  onSendMessage,
   isReasoning,
   thinkingState,
-  thinkingLog 
+  thinkingLog,
+  onBidWriterStart
 }) => {
   const { t } = useLanguage();
   const [input, setInput] = useState("");
@@ -48,7 +50,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <Sparkles className="text-purple-600 mr-2" size={20} />
           <h2 className="font-semibold text-gray-800">{t('chat.header.title')}</h2>
         </div>
-        <LanguageSwitcher />
+        <div className="flex items-center gap-3">
+          {onBidWriterStart && (
+            <button
+              onClick={onBidWriterStart}
+              className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-md transition-colors text-sm"
+            >
+              <PenTool size={14} />
+              <span>编写投标文件</span>
+            </button>
+          )}
+          <LanguageSwitcher />
+        </div>
       </div>
 
       {/* Messages Area */}
@@ -83,18 +96,37 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
               {/* Bubble */}
               <div className={clsx(
-                "p-3.5 rounded-2xl shadow-sm text-sm leading-relaxed",
-                msg.role === 'user' 
-                  ? "bg-blue-600 text-white rounded-tr-none" 
-                  : "bg-white border border-gray-100 text-gray-800 rounded-tl-none"
+                "flex flex-col",
+                msg.role === 'user' ? "items-end" : "items-start"
               )}>
-                <ReactMarkdown 
-                  components={{
-                    strong: ({node, ...props}) => <span className="font-bold bg-yellow-100/50 px-0.5 rounded text-gray-900" {...props} />
-                  }}
-                >
-                  {msg.content}
-                </ReactMarkdown>
+                <div className={clsx(
+                  "p-3.5 rounded-2xl shadow-sm text-sm leading-relaxed",
+                  msg.role === 'user'
+                    ? "bg-blue-600 text-white rounded-tr-none"
+                    : "bg-white border border-gray-100 text-gray-800 rounded-tl-none"
+                )}>
+                  <ReactMarkdown
+                    components={{
+                      strong: ({node, ...props}) => <span className="font-bold bg-yellow-100/50 px-0.5 rounded text-gray-900" {...props} />
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+
+                {/* Sources Display */}
+                {msg.role === 'ai' && msg.sources && msg.sources.length > 0 && (
+                  <div className="mt-2 px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg">
+                    <div className="text-xs text-gray-500 mb-1">Sources:</div>
+                    {msg.sources.map((source, idx) => (
+                      <div key={idx} className="text-xs text-gray-600 flex items-center">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mr-2" />
+                        <span className="font-medium">{source.title}</span>
+                        <span className="ml-2 text-gray-400">({Math.round(source.relevance * 100)}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

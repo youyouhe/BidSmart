@@ -8,6 +8,15 @@ import LanguageSwitcher from './LanguageSwitcher';
 import PerformanceModal from './PerformanceModal';
 import { clsx } from 'clsx';
 
+// Track progress for each document
+interface DocumentProgress {
+  documentId: string;
+  progress: number;
+  stage: string;
+  message: string;
+  metadata?: Record<string, any>;
+}
+
 interface DocumentGalleryProps {
   onBack: () => void;
   onSelect: (id: string) => void;
@@ -34,6 +43,9 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
   const [customPrompt, setCustomPrompt] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Document progress tracking
+  const [documentProgress, setDocumentProgress] = useState<Record<string, DocumentProgress>>({});
+
   // WebSocket connection tracking
   const webSocketConnectionsRef = useRef<Set<string>>(new Set());
 
@@ -59,6 +71,29 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
 
     const callbacks: WebSocketCallbacks = {
       onStatus: (update: StatusUpdateMessage) => {
+        console.log('[DocumentGallery] WebSocket status update:', { documentId, update });
+
+        // Update progress tracking for processing status
+        if (update.status === 'processing') {
+          setDocumentProgress(prev => ({
+            ...prev,
+            [documentId]: {
+              documentId,
+              progress: update.progress ?? 0,
+              stage: update.metadata?.stage || 'Processing...',
+              message: update.metadata?.message || update.metadata?.stage || 'Processing...',
+              metadata: update.metadata
+            }
+          }));
+        } else if (update.status === 'completed' || update.status === 'failed') {
+          // Remove progress when done
+          setDocumentProgress(prev => {
+            const newProgress = { ...prev };
+            delete newProgress[documentId];
+            return newProgress;
+          });
+        }
+
         // Update the document in the gallery items list
         setItems(prevItems =>
           prevItems.map(item => {
@@ -134,6 +169,23 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
       const result = await listDocuments(status);
       const galleryItems = transformToGalleryItems(result.items);
       setItems(galleryItems);
+
+      // Initialize progress for documents that are already processing
+      const newProgress: Record<string, DocumentProgress> = {};
+      galleryItems.forEach(item => {
+        if (item.parseStatus === 'processing') {
+          newProgress[item.id] = {
+            documentId: item.id,
+            progress: 0,
+            stage: 'Processing...',
+            message: 'Processing document...'
+          };
+        }
+      });
+
+      if (Object.keys(newProgress).length > 0) {
+        setDocumentProgress(prev => ({ ...prev, ...newProgress }));
+      }
 
       // Subscribe to WebSocket updates for processing documents
       galleryItems.forEach(item => {
@@ -394,9 +446,11 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
                          "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
                          item.parseStatus === 'failed'
                            ? "bg-red-100 text-red-600"
-                           : item.category === 'PDF'
-                             ? "bg-red-100 text-red-600"
-                             : "bg-blue-100 text-blue-600"
+                           : item.parseStatus === 'processing'
+                             ? "bg-blue-100 text-blue-600 animate-pulse"
+                             : item.category === 'PDF'
+                               ? "bg-red-100 text-red-600"
+                               : "bg-blue-100 text-blue-600"
                        )}>
                          <FileText size={20} />
                        </div>
@@ -405,7 +459,9 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
                            "text-xs font-medium px-2 py-1 rounded-md",
                            item.parseStatus === 'failed'
                              ? "bg-red-100 text-red-600"
-                             : "bg-gray-100 text-gray-600"
+                             : item.parseStatus === 'processing'
+                               ? "bg-blue-100 text-blue-600"
+                               : "bg-gray-100 text-gray-600"
                          )}>
                            {item.category}
                          </span>
@@ -434,10 +490,36 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({ onBack, onSelect, onL
                        "text-sm line-clamp-3",
                        item.parseStatus === 'failed'
                          ? "text-red-600"
-                         : "text-gray-500"
+                         : item.parseStatus === 'processing'
+                           ? "text-blue-600"
+                           : "text-gray-500"
                      )}>
                        {item.description}
                      </p>
+
+                     {/* Progress bar for processing documents */}
+                     {item.parseStatus === 'processing' && (
+                       <div className="mt-4">
+                         <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+                           <span className="truncate max-w-[70%]">
+                             {documentProgress[item.id]?.message || 'Processing document...'}
+                           </span>
+                           <span className="font-medium text-blue-600">
+                             {documentProgress[item.id] ? Math.round(documentProgress[item.id].progress) : 0}%
+                           </span>
+                         </div>
+                         <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                           {documentProgress[item.id] ? (
+                             <div
+                               className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300 ease-out"
+                               style={{ width: `${documentProgress[item.id].progress}%` }}
+                             />
+                           ) : (
+                             <div className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full animate-pulse w-1/3" />
+                           )}
+                         </div>
+                       </div>
+                     )}
                    </div>
                    <div className="px-5 py-3 border-t border-gray-50 bg-gray-50/50 flex items-center justify-between text-xs text-gray-400 rounded-b-xl">
                       <div className="flex items-center">
