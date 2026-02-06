@@ -116,6 +116,25 @@
 - npm or yarn
 - OpenAI API key or Azure OpenAI credentials
 
+### Clone Repository
+
+**Important**: This project uses git submodules. You must clone with the `--recursive` flag:
+
+```bash
+# Option 1: Clone with submodules (Recommended)
+git clone --recursive https://github.com/youyouhe/BidSmart.git
+cd BidSmart
+```
+
+If you already cloned without `--recursive`:
+
+```bash
+# Option 2: Initialize submodules after cloning
+git clone https://github.com/youyouhe/BidSmart.git
+cd BidSmart
+git submodule update --init --recursive
+```
+
 ### Backend Setup
 
 1. Navigate to backend directory:
