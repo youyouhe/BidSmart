@@ -41,10 +41,24 @@ export interface SubscribedMessage {
   message: string;
 }
 
+export interface AuditProgressMessage {
+  type: 'audit_progress';
+  document_id: string;
+  phase: string;
+  phase_number: number;
+  total_phases: number;
+  message: string;
+  progress: number;
+  metadata?: {
+    [key: string]: any;
+  };
+}
+
 export type WebSocketMessage =
   | StatusUpdateMessage
   | ConnectedMessage
   | SubscribedMessage
+  | AuditProgressMessage
   | 'ping'
   | 'pong';
 
@@ -53,6 +67,7 @@ export interface WebSocketCallbacks {
   onConnected?: (msg: ConnectedMessage) => void;
   onError?: (error: Error) => void;
   onProgress?: (progress: number) => void;
+  onAuditProgress?: (update: AuditProgressMessage) => void;
   onClosed?: () => void;
 }
 
@@ -211,6 +226,16 @@ export class DocumentWebSocket {
             setTimeout(() => {
               this.disconnect();
             }, 5000);
+          }
+          break;
+
+        case 'audit_progress':
+          console.log(`[WebSocket] Audit progress: Phase ${message.phase_number}/${message.total_phases} - ${message.message}`);
+          this.callbacks.onAuditProgress?.(message);
+          
+          // Also call generic onProgress if available
+          if (message.progress !== undefined) {
+            this.callbacks.onProgress?.(message.progress);
           }
           break;
       }

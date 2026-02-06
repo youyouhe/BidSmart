@@ -365,15 +365,25 @@ export const getGlobalPerformanceStats = async (): Promise<PerformanceStats | nu
 export const reparseDocument = async (
   id: string,
   model?: string,
-  customPrompt?: string
+  customPrompt?: string,
+  useDocumentToc?: 'auto' | 'yes' | 'no'
 ): Promise<DocumentTreeResponse> => {
+  const body: Record<string, any> = {
+    model,
+  };
+
+  if (customPrompt?.trim()) {
+    body.custom_prompt = customPrompt.trim();
+  }
+
+  if (useDocumentToc) {
+    body.use_document_toc = useDocumentToc;
+  }
+
   const response = await fetch(`${getApiBaseUrl()}/api/documents/${id}/parse`, {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({
-      model,
-      custom_prompt: customPrompt?.trim(),
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -396,7 +406,14 @@ export const reparseDocument = async (
  * Note: This uses a different endpoint than parseDocument
  * Returns document ID that can be used to poll for completion
  */
-export const uploadDocument = async (file: File, customPrompt?: string): Promise<UploadDocumentResponse> => {
+export const uploadDocument = async (
+  file: File,
+  customPrompt?: string,
+  useDocumentToc?: 'auto' | 'yes' | 'no',
+  enableAudit?: boolean,
+  auditMode?: 'progressive' | 'standard',
+  auditConfidence?: number
+): Promise<UploadDocumentResponse> => {
   const formData = new FormData();
   formData.append('file', file);
   // Add optional parameters for parsing
@@ -407,8 +424,25 @@ export const uploadDocument = async (file: File, customPrompt?: string): Promise
   if (customPrompt && customPrompt.trim()) {
     formData.append('custom_prompt', customPrompt.trim());
   }
+  // Add use_document_toc parameter if provided
+  if (useDocumentToc) {
+    formData.append('use_document_toc', useDocumentToc);
+  }
+  // Add audit parameters if provided
+  if (enableAudit !== undefined) {
+    formData.append('enable_audit', enableAudit.toString());
+  }
+  if (auditMode) {
+    formData.append('audit_mode', auditMode);
+  }
+  if (auditConfidence !== undefined) {
+    formData.append('audit_confidence', auditConfidence.toString());
+  }
 
   console.log('Uploading file:', file.name, 'Size:', file.size);
+  if (enableAudit) {
+    console.log('Audit enabled:', { mode: auditMode, confidence: auditConfidence });
+  }
 
   const response = await fetch(`${getApiBaseUrl()}/api/documents/upload`, {
     method: 'POST',
@@ -547,22 +581,41 @@ export const transformToGalleryItems = (documents: Document[]): GalleryItem[] =>
  *     onStatus: (update) => console.log('Status:', update.status),
  *     onProgress: (progress) => console.log('Progress:', progress),
  *     onError: (error) => console.error('Error:', error),
- *   }
+ *   },
+ *   useDocumentToc,
+ *   enableAudit,
+ *   auditMode,
+ *   auditConfidence
  * );
  * ```
  *
  * @param file - The file to upload
  * @param customPrompt - Optional custom prompt for TOC extraction
  * @param callbacks - WebSocket event callbacks
+ * @param useDocumentToc - Parse method preference
+ * @param enableAudit - Enable tree quality audit
+ * @param auditMode - Audit mode (progressive or standard)
+ * @param auditConfidence - Confidence threshold for audit
  * @returns Object with documentId and websocket connection
  */
 export const uploadDocumentWithWebSocket = async (
   file: File,
   customPrompt: string | undefined,
-  callbacks: WebSocketCallbacks
+  callbacks: WebSocketCallbacks,
+  useDocumentToc?: 'auto' | 'yes' | 'no',
+  enableAudit?: boolean,
+  auditMode?: 'progressive' | 'standard',
+  auditConfidence?: number
 ): Promise<{ documentId: string; websocket: DocumentWebSocket }> => {
   // Upload the document first
-  const uploadResponse = await uploadDocument(file, customPrompt);
+  const uploadResponse = await uploadDocument(
+    file, 
+    customPrompt, 
+    useDocumentToc,
+    enableAudit,
+    auditMode,
+    auditConfidence
+  );
 
   // Establish WebSocket connection for status updates
   const websocket = subscribeToDocumentStatus(uploadResponse.id, callbacks);
@@ -682,3 +735,344 @@ export const categorizeDocument = async (id: string, force = false): Promise<{
 
   return await response.json();
 };
+
+/**
+ * Get audit report with suggestions for a document
+ */
+export const getAuditReport = async (
+  documentId: string,
+  filters?: {
+    action?: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE';
+    status?: 'pending' | 'accepted' | 'rejected' | 'applied';
+    confidence?: 'high' | 'medium' | 'low';
+  }
+): Promise<{
+  audit_id: string;
+  doc_id: string;
+  doc_name: string;
+  document_type?: string;
+  quality_score?: number;
+  status: string;
+  summary?: {
+    total_nodes: number;
+    suggestions_by_action: Record<string, number>;
+    suggestions_by_confidence: Record<string, number>;
+  };
+  suggestions: Array<{
+    suggestion_id: string;
+    action: string;
+    node_id?: string;
+    status: string;
+    confidence?: string;
+    reason?: string;
+    current_title?: string;
+    suggested_title?: string;
+    node_info?: any;
+    user_action?: string;
+    user_comment?: string;
+  }>;
+  conflicts: Array<{
+    node_id: string;
+    conflicting_suggestions: string[];
+    recommendation?: string;
+  }>;
+  created_at?: string;
+  applied_at?: string;
+}> => {
+  const params = new URLSearchParams();
+  if (filters?.action) params.append('action', filters.action);
+  if (filters?.status) params.append('status', filters.status);
+  if (filters?.confidence) params.append('confidence', filters.confidence);
+
+  const url = `${getApiBaseUrl()}/api/documents/${documentId}/audit${params.toString() ? '?' + params.toString() : ''}`;
+  
+  const response = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('No audit report found for this document');
+    }
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to get audit report: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Review a suggestion (accept or reject)
+ */
+export const reviewSuggestion = async (
+  documentId: string,
+  suggestionId: string,
+  action: 'accept' | 'reject',
+  comment?: string
+): Promise<{
+  suggestion_id: string;
+  status: string;
+  message: string;
+}> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/documents/${documentId}/audit/suggestions/${suggestionId}/review`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ action, comment }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to review suggestion: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Apply accepted suggestions to the tree
+ */
+export const applyAuditSuggestions = async (
+  documentId: string,
+  suggestionIds?: string[]
+): Promise<{
+  success: boolean;
+  applied_count: number;
+  backup_id: string;
+  message: string;
+  warnings?: string[];
+}> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/documents/${documentId}/audit/apply`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ suggestion_ids: suggestionIds }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to apply suggestions: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Rollback to a backup snapshot
+ */
+export const rollbackAudit = async (
+  documentId: string,
+  backupId: string
+): Promise<{
+  success: boolean;
+  message: string;
+}> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/documents/${documentId}/audit/rollback`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ backup_id: backupId }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to rollback: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Update a node's title in the document tree
+ */
+export const updateNodeTitle = async (
+  documentId: string,
+  nodeId: string,
+  newTitle: string
+): Promise<{
+  success: boolean;
+  message: string;
+  document_id: string;
+  node_id: string;
+  new_title: string;
+  tree: Node;
+}> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/documents/${documentId}/nodes/${nodeId}/title`,
+    {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ new_title: newTitle }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to update node title: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Trigger tree quality audit for a document
+ */
+export const auditDocumentTree = async (
+  documentId: string,
+  mode: 'progressive' | 'standard' = 'progressive',
+  confidenceThreshold: number = 0.7
+): Promise<{
+  success: boolean;
+  document_id: string;
+  mode: string;
+  audit_id: string;
+  quality_score: number;
+  summary: {
+    original_nodes: number;
+    optimized_nodes: number;
+    total_suggestions: number;
+    changes_applied: Record<string, number>;
+  };
+  suggestions: Array<{
+    suggestion_id: string;
+    action: string;
+    node_id?: string;
+    confidence?: string;
+    reason?: string;
+    current_title?: string;
+    suggested_title?: string;
+    status: string;
+  }>;
+  message: string;
+}> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/documents/${documentId}/audit?mode=${mode}&confidence_threshold=${confidenceThreshold}`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to audit document tree: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Batch review suggestions (accept or reject)
+ * @param documentId - Document ID
+ * @param action - 'accept' or 'reject'
+ * @param filters - Optional filters (confidence, action, status)
+ * @param suggestionIds - Optional specific suggestion IDs
+ * @param comment - Optional comment
+ */
+export const batchReviewSuggestions = async (
+  documentId: string,
+  action: 'accept' | 'reject',
+  filters?: {
+    confidence?: 'high' | 'medium' | 'low';
+    action?: string;
+    status?: string;
+  },
+  suggestionIds?: string[],
+  comment?: string
+): Promise<{
+  updated_count: number;
+  suggestion_ids: string[];
+  message: string;
+}> => {
+  const authHeaders = getAuthHeaders();
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/audit/suggestions/batch-review`, {
+    method: 'POST',
+    headers: authHeaders,
+    body: JSON.stringify({
+      action,
+      filters,
+      suggestion_ids: suggestionIds,
+      comment,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to batch review suggestions: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+
+
+/**
+ * Get all audit backups for a document
+ * @param documentId - Document ID
+ */
+export const getAuditBackups = async (documentId: string): Promise<{
+  doc_id: string;
+  backups: Array<{
+    backup_id: string;
+    doc_id: string;
+    audit_id: string;
+    backup_path: string;
+    created_at: string;
+    node_count?: number;
+    error?: string;
+  }>;
+  total: number;
+}> => {
+  const authHeaders = getAuthHeaders();
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/audit/backups`, {
+    method: "GET",
+    headers: authHeaders,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || `Failed to get backups: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Restore document tree from a backup (undo operation)
+ * @param documentId - Document ID
+ * @param backupId - Backup ID to restore from
+ */
+export const restoreFromBackup = async (
+  documentId: string,
+  backupId: string
+): Promise<{
+  success: boolean;
+  message: string;
+  backup_id: string;
+  restored_at: string;
+  node_count: number;
+  new_backup_id?: string;
+}> => {
+  const authHeaders = getAuthHeaders();
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/documents/${documentId}/audit/backups/${backupId}/restore`,
+    {
+      method: "POST",
+      headers: authHeaders,
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(error.detail || `Failed to restore backup: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
