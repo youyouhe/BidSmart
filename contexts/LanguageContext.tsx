@@ -37,7 +37,10 @@ const translations = {
     "gallery.select": "Open Document",
     "gallery.category.all": "All",
     "gallery.search": "Search...",
-    "gallery.no_results": "No documents found."
+    "gallery.no_results": "No documents found.",
+    "gallery.empty_state_title": "No documents yet",
+    "gallery.empty_state_description": "Upload your first document to get started. Supported formats: PDF, Markdown",
+    "gallery.upload_first": "Upload Document"
   },
   zh: {
     "app.title": "智标助手",
@@ -73,7 +76,10 @@ const translations = {
     "gallery.select": "打开文档",
     "gallery.category.all": "全部",
     "gallery.search": "搜索...",
-    "gallery.no_results": "未找到文档。"
+    "gallery.no_results": "未找到文档。",
+    "gallery.empty_state_title": "还没有文档",
+    "gallery.empty_state_description": "上传您的第一个文档以开始使用。支持格式：PDF、Markdown",
+    "gallery.upload_first": "上传文档"
   }
 };
 

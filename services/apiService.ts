@@ -36,7 +36,7 @@ export const getApiBaseUrl = (): string => {
 };
 
 // Get auth headers
-const getAuthHeaders = (): Record<string, string> => {
+export const getAuthHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -209,6 +209,8 @@ export const chatWithDocument = async (
     debug_path: data.debug_path,
     provider: data.provider,
     model: data.model,
+    system_prompt: data.system_prompt, // Include system prompt for debugging
+    raw_output: data.raw_output, // Include raw output for debugging
   };
 };
 
@@ -683,6 +685,73 @@ export const saveConversationMessage = async (
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail || `Failed to save message: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Save conversation debug information
+ * Note: Debug info is stored separately from the main conversation to keep business data clean
+ */
+export const saveConversationDebug = async (
+  documentId: string,
+  messageId: string,
+  systemPrompt?: string,
+  rawOutput?: string,
+  modelUsed?: string,
+  promptTokens?: number,
+  completionTokens?: number,
+  totalTokens?: number
+): Promise<{ id: string; message_id: string; document_id: string; created: boolean }> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/conversations/${messageId}/debug`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      message_id: messageId,
+      system_prompt: systemPrompt,
+      raw_output: rawOutput,
+      model_used: modelUsed,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: totalTokens,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to save debug info: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Get conversation debug information for a specific message
+ */
+export const getConversationDebug = async (
+  documentId: string,
+  messageId: string
+): Promise<{
+  id: string;
+  message_id: string;
+  document_id: string;
+  system_prompt?: string;
+  raw_output?: string;
+  model_used?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  created_at?: string;
+}> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/documents/${documentId}/conversations/${messageId}/debug`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to get debug info: ${response.statusText}`);
   }
 
   return await response.json();

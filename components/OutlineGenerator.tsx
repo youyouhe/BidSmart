@@ -191,7 +191,7 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
               <div className="flex items-start gap-3">
                 <FileText className="text-gray-400 shrink-0 mt-1" size={18} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-gray-900 font-medium truncate">{tenderDocumentTree.title}</p>
+                  <p className="text-gray-900 font-medium truncate">{tenderDocumentTree.display_title || tenderDocumentTree.title}</p>
                   <p className="text-sm text-gray-500 mt-1">
                     {tenderDocumentTree.children.length} 个章节
                   </p>

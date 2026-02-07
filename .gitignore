@@ -60,6 +60,9 @@ lib/docmind-ai/data/parsed/*
 lib/docmind-ai/data/*.db
 lib/docmind-ai/data/*.db-journal
 
+# Debug logs (按 UUID 保存的调试日志)
+lib/docmind-ai/debug_logs/*.log
+
 # Keep directory structure
 !lib/docmind-ai/data/uploads/.gitkeep
 !lib/docmind-ai/data/parsed/.gitkeep

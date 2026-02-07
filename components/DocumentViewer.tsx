@@ -177,6 +177,81 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const handleZoomOut = () => setScale(prev => Math.max(prev - 0.25, 0.5));
   const handleResetZoom = () => setScale(1.5);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+        case 'j':
+          e.preventDefault();
+          container.scrollBy({ top: 200, behavior: 'smooth' });
+          break;
+        case 'ArrowUp':
+        case 'k':
+          e.preventDefault();
+          container.scrollBy({ top: -200, behavior: 'smooth' });
+          break;
+        case 'PageDown':
+        case ' ':
+          e.preventDefault();
+          container.scrollBy({ top: container.clientHeight - 100, behavior: 'smooth' });
+          break;
+        case 'PageUp':
+        case 'Shift+ ':
+          e.preventDefault();
+          container.scrollBy({ top: -(container.clientHeight - 100), behavior: 'smooth' });
+          break;
+        case 'Home':
+          e.preventDefault();
+          container.scrollTo({ top: 0, behavior: 'smooth' });
+          break;
+        case 'End':
+          e.preventDefault();
+          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+          break;
+        case '+':
+        case '=':
+          e.preventDefault();
+          handleZoomIn();
+          break;
+        case '-':
+        case '_':
+          e.preventDefault();
+          handleZoomOut();
+          break;
+        case '0':
+          e.preventDefault();
+          handleResetZoom();
+          break;
+        case 'g':
+        case 'G':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            const pageNum = prompt(`跳转到页面 (1-${totalPages}):`);
+            if (pageNum) {
+              const page = parseInt(pageNum);
+              if (!isNaN(page) && page >= 1 && page <= totalPages) {
+                const pageElement = pageRefs.current.get(page);
+                pageElement?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [totalPages, handleZoomIn, handleZoomOut, handleResetZoom]);
+
   // Re-render all pages when scale changes
   useEffect(() => {
     setRenderedPages(new Map());
@@ -218,7 +293,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             文档预览
           </span>
           <h2 className="text-white text-sm font-medium truncate max-w-md">
-            {documentTree.title}
+            {documentTree.display_title || documentTree.title}
           </h2>
           <div className="h-4 w-px bg-gray-600"></div>
           <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
@@ -326,14 +401,19 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <div
             className="flex items-center gap-1 bg-gray-700 px-2 py-0.5 rounded cursor-pointer hover:bg-gray-600"
             onClick={handleResetZoom}
-            title="重置缩放"
+            title="重置缩放 (0)"
           >
             <RotateCcw size={10} />
             {Math.round(scale * 100)}%
           </div>
           <span>已渲染: {renderedPages.size}/{totalPages} 页</span>
         </div>
-        <span>{activeNodeIds.length > 0 ? `已高亮 ${activeNodeIds.length} 个节点` : '文档预览'}</span>
+        <div className="flex items-center gap-3">
+          <span className="hidden sm:inline" title="键盘快捷键">
+            ↑↓ 滚动 | PgUp/Dn 翻页 | +/- 缩放 | 0 重置 | Ctrl+G 跳转
+          </span>
+          <span>{activeNodeIds.length > 0 ? `已高亮 ${activeNodeIds.length} 个节点` : '文档预览'}</span>
+        </div>
       </div>
     </div>
   );

@@ -18,10 +18,17 @@ interface DocumentProgress {
 }
 
 interface DocumentGalleryProps {
-  onBack: () => void;
-  onSelect: (id: string) => void;
-  onLoadDocument: (id: string) => Promise<void>;
-  onUpload?: (file: File, customPrompt?: string) => void;
+  onBack?: () => void;
+  onSelectDocument?: (id: string) => void;
+  onLoadDocument?: (documentTree: DocumentTree) => void;
+  onUpload?: (
+    file: File, 
+    customPrompt?: string, 
+    useDocumentToc?: 'auto' | 'yes' | 'no',
+    enableAudit?: boolean,
+    auditMode?: 'progressive' | 'standard',
+    auditConfidence?: number
+  ) => void;
   onOpenApiSettings?: () => void;
   newlyUploadedDocumentId?: string | null;
   isUploading?: boolean;
@@ -56,7 +63,13 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
 
   // Custom prompt state
   const [customPrompt, setCustomPrompt] = useState('');
+  const [useDocumentToc, setUseDocumentToc] = useState<'auto' | 'yes' | 'no'>('auto');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  
+  // Audit settings
+  const [enableAudit, setEnableAudit] = useState(false);
+  const [auditMode, setAuditMode] = useState<'progressive' | 'standard'>('progressive');
+  const [auditConfidence, setAuditConfidence] = useState(0.7);
 
   // Upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -123,17 +136,23 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
         // Update progress tracking for processing status
         if (update.status === 'processing') {
           setDocumentProgress(prev => {
+            const currentProgress = prev[targetDocId]?.progress ?? 0;
+            const newProgressValue = update.progress ?? 0;
+            
+            // Ensure progress is monotonically increasing
+            const finalProgress = Math.max(currentProgress, newProgressValue);
+            
             const newProgress = {
               ...prev,
               [targetDocId]: {
                 documentId: targetDocId,
-                progress: update.progress ?? 0,
+                progress: finalProgress,
                 stage: update.metadata?.stage || 'Processing...',
                 message: update.metadata?.message || update.metadata?.stage || 'Processing...',
                 metadata: update.metadata
               }
             };
-            console.log('[DocumentGallery] Updated documentProgress for', targetDocId, 'progress:', update.progress);
+            console.log('[DocumentGallery] Updated documentProgress for', targetDocId, 'progress:', currentProgress, '->', finalProgress);
             return newProgress;
           });
         } else if (update.status === 'completed' || update.status === 'failed') {
@@ -250,6 +269,7 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
       const newProgress: Record<string, DocumentProgress> = {};
       galleryItems.forEach(item => {
         if (item.parseStatus === 'processing') {
+          // Don't overwrite existing progress - only initialize if not present
           newProgress[item.id] = {
             documentId: item.id,
             progress: 0,
@@ -260,7 +280,18 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
       });
 
       if (Object.keys(newProgress).length > 0) {
-        setDocumentProgress(prev => ({ ...prev, ...newProgress }));
+        setDocumentProgress(prev => {
+          // Merge new progress, but keep existing progress if higher
+          const merged = { ...prev };
+          Object.entries(newProgress).forEach(([docId, newProg]) => {
+            if (!merged[docId] || merged[docId].progress === undefined) {
+              // Initialize only if not present
+              merged[docId] = newProg;
+            }
+            // If already exists, keep the existing (higher) progress
+          });
+          return merged;
+        });
       }
 
       // Subscribe to WebSocket updates for processing documents
@@ -315,16 +346,23 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
             const progress = doc.metadata?.progress || 0;
             const stage = doc.metadata?.stage || 'Processing...';
 
-            setDocumentProgress(prev => ({
-              ...prev,
-              [newlyUploadedDocumentId]: {
-                documentId: newlyUploadedDocumentId,
-                progress,
-                stage,
-                message: stage,
-                metadata: doc.metadata
-              }
-            }));
+            setDocumentProgress(prev => {
+              const currentProgress = prev[newlyUploadedDocumentId]?.progress ?? 0;
+              
+              // Ensure progress is monotonically increasing
+              const finalProgress = Math.max(currentProgress, progress);
+              
+              return {
+                ...prev,
+                [newlyUploadedDocumentId]: {
+                  documentId: newlyUploadedDocumentId,
+                  progress: finalProgress,
+                  stage,
+                  message: stage,
+                  metadata: doc.metadata
+                }
+              };
+            });
             console.log('[DocumentGallery] Polling: progress =', progress);
           } else if (doc.parse_status === 'completed' || doc.parse_status === 'failed') {
             // Clear polling interval
@@ -499,8 +537,8 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
     setError(null);
 
     try {
-      // Re-parse the document (synchronous operation) with custom prompt if provided
-      await reparseDocument(id, undefined, customPrompt);
+      // Re-parse the document (synchronous operation) with custom prompt and parse mode
+      await reparseDocument(id, undefined, customPrompt, useDocumentToc);
       // Refresh the list to show updated status
       await fetchDocuments();
     } catch (err) {
@@ -531,7 +569,14 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0] && onUpload) {
-      onUpload(e.target.files[0], customPrompt);
+      onUpload(
+        e.target.files[0], 
+        customPrompt, 
+        useDocumentToc,
+        enableAudit,
+        auditMode,
+        auditConfidence
+      );
     }
   };
 
@@ -590,7 +635,7 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
               title="Parse settings"
             >
               <Settings size={16} />
-              <span>Prompt</span>
+              <span>Settings</span>
               {settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
             {onOpenApiSettings && (
@@ -616,6 +661,19 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
         <div className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
           <div className="max-w-3xl">
             <label className="block text-sm font-medium text-gray-700 mb-2">
+              Parse Method
+            </label>
+            <select
+              value={useDocumentToc}
+              onChange={(e) => setUseDocumentToc(e.target.value as 'auto' | 'yes' | 'no')}
+              className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4"
+            >
+              <option value="auto">Auto Detect (Recommended)</option>
+              <option value="yes">Use Document TOC</option>
+              <option value="no">Use AI Analysis</option>
+            </select>
+
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Custom TOC Extraction Prompt
             </label>
             <p className="text-xs text-gray-500 mb-2">
@@ -628,7 +686,7 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows={3}
             />
-            <div className="flex items-center justify-between mt-2">
+            <div className="flex items-center justify-between mt-2 mb-6">
               <span className="text-xs text-gray-400">
                 {customPrompt.length} characters
               </span>
@@ -638,6 +696,76 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
               >
                 Clear
               </button>
+            </div>
+
+            {/* Audit Settings */}
+            <div className="border-t border-gray-200 pt-4 mt-4">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center">
+                <Settings size={14} className="mr-2" />
+                Tree Quality Audit
+              </h3>
+              
+              <label className="flex items-center cursor-pointer mb-4">
+                <input
+                  type="checkbox"
+                  checked={enableAudit}
+                  onChange={(e) => setEnableAudit(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="ml-2 text-sm font-medium text-gray-700">
+                  Enable intelligent tree auditor
+                </span>
+              </label>
+
+              {enableAudit && (
+                <div className="ml-6 space-y-3 pl-4 border-l-2 border-blue-100">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Audit Mode
+                    </label>
+                    <select
+                      value={auditMode}
+                      onChange={(e) => setAuditMode(e.target.value as 'progressive' | 'standard')}
+                      className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="progressive">Progressive (5-round, Recommended)</option>
+                      <option value="standard">Standard (1-round)</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {auditMode === 'progressive' 
+                        ? 'Runs 5 focused rounds: DELETE → FORMAT → CHECK_SEQUENCE → ADD → PAGE'
+                        : 'Runs all checks in one round (faster but less accurate)'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Confidence Threshold: {auditConfidence.toFixed(1)}
+                    </label>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="1.0"
+                      step="0.1"
+                      value={auditConfidence}
+                      onChange={(e) => setAuditConfidence(parseFloat(e.target.value))}
+                      className="w-full max-w-md h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500 mt-1 max-w-md">
+                      <span>Conservative (0.5)</span>
+                      <span>Balanced (0.7)</span>
+                      <span>Strict (1.0)</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 max-w-md">
+                    <p className="text-xs text-blue-700">
+                      <strong>What it does:</strong> Automatically fixes quality issues like invalid titles, 
+                      formatting inconsistencies, and missing sections.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -744,21 +872,54 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
            </div>
         </div>
 
-        {/* Main Grid */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-8">
+         {/* Main Grid */}
+         <div className="flex-1 overflow-y-auto p-6 md:p-8">
            {loading ? (
-             <div className="flex items-center justify-center h-full text-gray-400">Loading documents...</div>
+             <div className="flex items-center justify-center h-full text-gray-400">
+               <RefreshCw size={20} className="animate-spin mr-2" />
+               Loading documents...
+             </div>
            ) : filteredItems.length === 0 ? (
              <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                <Filter size={48} className="mb-4 opacity-20" />
-                <p>{error ? error : t('gallery.no_results')}</p>
-                {!error && (
-                  <button
-                    onClick={fetchDocuments}
-                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Refresh
-                  </button>
+                {items.length === 0 && !error ? (
+                  // Empty database state
+                  <>
+                    <UploadCloud size={64} className="mb-4 opacity-20" />
+                    <p className="text-lg font-medium text-gray-600 mb-2">
+                      {t('gallery.empty_state_title') || 'No documents yet'}
+                    </p>
+                    <p className="text-sm text-gray-500 mb-6 max-w-md text-center">
+                      {t('gallery.empty_state_description') || 'Upload your first document to get started. Supported formats: PDF, Markdown'}
+                    </p>
+                    {onUpload && (
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                      >
+                        <UploadCloud size={20} />
+                        <span>{t('gallery.upload_first') || 'Upload Document'}</span>
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  // Filtered results empty state
+                  <>
+                    <Filter size={48} className="mb-4 opacity-20" />
+                    <p className="text-lg font-medium text-gray-600 mb-2">{error ? error : (t('gallery.no_results') || 'No documents found')}</p>
+                    <p className="text-sm text-gray-500 mb-4">Try adjusting your filters or search term</p>
+                    {!error && (
+                      <button
+                        onClick={() => {
+                          setSearchTerm('');
+                          setStatusFilter('all');
+                          setCategoryFilter('all');
+                        }}
+                        className="mt-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                      >
+                        Clear Filters
+                      </button>
+                    )}
+                  </>
                 )}
              </div>
            ) : (

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Node } from '../types';
-import { ChevronRight, ChevronDown, FileText, Folder, FolderOpen, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { ChevronRight, ChevronDown, FileText, Folder, FolderOpen, AlertCircle, CheckCircle, XCircle, ZoomIn } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ContextMenu from './ContextMenu';
 
 interface AuditSuggestion {
   suggestion_id: string;
-  action: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE';
+  action: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND';
   node_id?: string;  // For DELETE, MODIFY operations
   status: string;
   confidence?: string;
@@ -21,6 +21,10 @@ interface AuditSuggestion {
       after_node_id?: string;
       before_node_id?: string;
     };
+    page_range?: [number, number];  // For EXPAND operations
+    target_depth?: number;          // For EXPAND operations
+    current_span?: number;           // For EXPAND operations
+    current_children?: number;       // For EXPAND operations
     [key: string]: any;
   };
 }
@@ -72,6 +76,13 @@ const ACTION_COLORS = {
     hover: 'hover:bg-orange-100',
     icon: 'text-orange-500',
   },
+  EXPAND: {
+    bg: 'bg-purple-50',
+    border: 'border-purple-300',
+    text: 'text-purple-700',
+    hover: 'hover:bg-purple-100',
+    icon: 'text-purple-500',
+  },
 };
 
 // Confidence level badges
@@ -117,7 +128,22 @@ const TreeView: React.FC<TreeViewProps> = ({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitle, setEditingTitle] = useState('');
   const hasChildren = node.children && node.children.length > 0;
-  
+
+  // Helper to get the display title (prefer display_title, fallback to title)
+  const getDisplayTitle = () => {
+    // In edit mode, use edited title or original title
+    if (editedTitles[node.id]) {
+      return editedTitles[node.id];
+    }
+    // Prefer display_title for display, fallback to title
+    return node.display_title || node.title;
+  };
+
+  // Helper to get the original title for editing
+  const getOriginalTitle = () => {
+    return editedTitles[node.id] || node.title;
+  };
+
   // Find suggestions for this node
   // For DELETE/MODIFY: match by node_id
   // For ADD: show on parent_id or after_node_id (stored in node_info)
@@ -250,8 +276,7 @@ const TreeView: React.FC<TreeViewProps> = ({
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (isEditMode && onTitleEdit) {
       e.stopPropagation();
-      const currentTitle = editedTitles[node.id] || node.title;
-      setEditingTitle(currentTitle);
+      setEditingTitle(getOriginalTitle());
       setIsEditingTitle(true);
     }
   };
@@ -291,7 +316,12 @@ const TreeView: React.FC<TreeViewProps> = ({
     
     const action = primarySuggestion.action;
     const iconClass = colorScheme?.icon || '';
-    const tooltipText = `建议${action === 'DELETE' ? '删除' : action === 'ADD' ? '添加' : '修改'}: ${primarySuggestion.reason}`;
+    const tooltipText = `建议${
+      action === 'DELETE' ? '删除' : 
+      action === 'ADD' ? '添加' : 
+      action === 'EXPAND' ? '扩展分析' : 
+      '修改'
+    }: ${primarySuggestion.reason}`;
     
     if (action === 'DELETE') {
       return (
@@ -303,6 +333,12 @@ const TreeView: React.FC<TreeViewProps> = ({
       return (
         <span title={tooltipText}>
           <CheckCircle size={14} className={iconClass} />
+        </span>
+      );
+    } else if (action === 'EXPAND') {
+      return (
+        <span title={tooltipText}>
+          <ZoomIn size={14} className={iconClass} />
         </span>
       );
     } else {
@@ -378,7 +414,7 @@ const TreeView: React.FC<TreeViewProps> = ({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span 
+          <span
             className={clsx(
               "truncate text-sm leading-tight flex-1",
               isEditMode && "cursor-text hover:bg-yellow-50 px-1 rounded"
@@ -387,11 +423,11 @@ const TreeView: React.FC<TreeViewProps> = ({
           >
             {hasSuggestion && primarySuggestion.action === 'MODIFY_FORMAT' && primarySuggestion.suggested_title ? (
               <>
-                <span className="line-through opacity-60">{editedTitles[node.id] || node.title}</span>
+                <span className="line-through opacity-60">{getDisplayTitle()}</span>
                 <span className="ml-2 font-medium">{primarySuggestion.suggested_title}</span>
               </>
             ) : (
-              editedTitles[node.id] || node.title
+              getDisplayTitle()
             )}
           </span>
         )}

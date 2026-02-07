@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Node, Message, ThinkingState, ChatMessage, TenderProject, TenderSection, WorkflowState, RewriteRequest, AIConfig, WritingLanguage } from './types';
-import { chatWithDocument, checkHealth, getDocumentTree, uploadDocumentWithWebSocket, getConversationHistory, saveConversationMessage, deleteConversationHistory, updateApiSettings, getAuditReport, reviewSuggestion, applyAuditSuggestions, updateNodeTitle, auditDocumentTree, batchReviewSuggestions, getAuditBackups, restoreFromBackup } from './services/apiService';
+import { chatWithDocument, checkHealth, getDocumentTree, uploadDocumentWithWebSocket, getConversationHistory, saveConversationMessage, saveConversationDebug, deleteConversationHistory, updateApiSettings, getAuditReport, reviewSuggestion, applyAuditSuggestions, updateNodeTitle, auditDocumentTree, batchReviewSuggestions, getAuditBackups, restoreFromBackup } from './services/apiService';
 import { websocketManager } from './services/websocketService';
 import TreeView from './components/TreeView';
 import ChatInterface from './components/ChatInterface';
@@ -16,6 +16,8 @@ import DocumentViewer from './components/DocumentViewer';
 import ResizableDivider from './components/ResizableDivider';
 import SettingsModal, { loadSettings, type ApiSettings } from './components/SettingsModal';
 import BackupManager from './components/BackupManager';
+import ConversationDebugModal from './components/ConversationDebugModal';
+import ParseDebugViewer from './components/ParseDebugViewer';
 import { GitBranch, BookOpen, ArrowLeft, FileText, PenTool, ChevronsRight, ChevronsLeft, Download, Settings, Server, CheckCircle, Filter, CheckCheck, XCircle, Clock } from 'lucide-react';
 import { useLanguage } from './contexts/LanguageContext';
 import { convertOutlineToSections, exportDocument as exportDoc } from './services/bidWriterService';
@@ -53,7 +55,7 @@ function App() {
   // Audit suggestions state
   const [auditSuggestions, setAuditSuggestions] = useState<Array<{
     suggestion_id: string;
-    action: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE';
+    action: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND';
     node_id?: string;
     status: string;
     confidence?: string;
@@ -71,6 +73,12 @@ function App() {
   
   // Backup manager state
   const [showBackupManager, setShowBackupManager] = useState(false);
+
+  // Conversation debug modal state
+  const [showConversationDebug, setShowConversationDebug] = useState(false);
+
+  // Parse debug viewer state
+  const [showParseDebug, setShowParseDebug] = useState(false);
 
   // Panel widths (in pixels)
   const [leftPanelWidth, setLeftPanelWidth] = useState(380);
@@ -238,7 +246,7 @@ function App() {
         console.log('Loaded audit report:', auditReport);
         setAuditSuggestions(auditReport.suggestions.map(s => ({
           ...s,
-          action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE'
+          action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND'
         })));
       } catch (auditError) {
         console.log('No audit report found or failed to load:', auditError);
@@ -514,7 +522,8 @@ function App() {
     const actionLabel = action === 'DELETE' ? '删除' : 
                         action === 'ADD' ? '添加' : 
                         action === 'MODIFY_FORMAT' ? '格式修改' : 
-                        action === 'MODIFY_PAGE' ? '页码修改' : action;
+                        action === 'MODIFY_PAGE' ? '页码修改' :
+                        action === 'EXPAND' ? '扩展分析' : action;
     
     const confirmed = window.confirm(
       `确定要接受所有 ${suggestions.length} 个${actionLabel}操作建议吗？`
@@ -567,7 +576,8 @@ function App() {
     const actionLabel = action === 'DELETE' ? '删除' : 
                         action === 'ADD' ? '添加' : 
                         action === 'MODIFY_FORMAT' ? '格式修改' : 
-                        action === 'MODIFY_PAGE' ? '页码修改' : action;
+                        action === 'MODIFY_PAGE' ? '页码修改' :
+                        action === 'EXPAND' ? '扩展分析' : action;
     
     const confirmed = window.confirm(
       `确定要拒绝所有 ${suggestions.length} 个${actionLabel}操作建议吗？`
@@ -697,7 +707,7 @@ function App() {
             
             const suggestions = existingReport.suggestions.map(s => ({
               suggestion_id: s.suggestion_id,
-              action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE',
+              action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND',
               node_id: s.node_id,
               status: s.status,
               confidence: s.confidence,
@@ -871,15 +881,32 @@ function App() {
 
       // Save AI response to conversation history
       if (currentDocumentId) {
-        saveConversationMessage(
-          currentDocumentId,
-          'assistant',
-          response.answer,
-          response.sources,
-          response.debug_path
-        ).catch(e => {
-          console.warn('Failed to save AI message:', e);
-        });
+        try {
+          // First, save the message
+          const savedMessage = await saveConversationMessage(
+            currentDocumentId,
+            'assistant',
+            response.answer,
+            response.sources,
+            response.debug_path
+          );
+
+          // Then, save debug information separately (if available)
+          if (response.system_prompt || response.raw_output) {
+            await saveConversationDebug(
+              currentDocumentId,
+              savedMessage.id,
+              response.system_prompt,
+              response.raw_output,
+              response.model,
+              undefined,  // promptTokens - not available from current API
+              undefined,  // completionTokens - not available from current API
+              undefined   // totalTokens - not available from current API
+            );
+          }
+        } catch (e) {
+          console.warn('Failed to save AI message or debug info:', e);
+        }
       }
 
     } catch (e) {
@@ -1291,7 +1318,7 @@ function App() {
                   const auditReport = await getAuditReport(currentDocumentId, { status: 'pending' });
                   setAuditSuggestions(auditReport.suggestions.map(s => ({
                     ...s,
-                    action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE'
+                    action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND'
                   })));
                 } catch {
                   setAuditSuggestions([]);
@@ -1329,8 +1356,8 @@ function App() {
 
               <div className="flex-1 min-w-0 flex items-center">
                 <BookOpen className="text-gray-400 mr-2 shrink-0" size={16} />
-                <h1 className="font-semibold text-gray-700 text-sm truncate" title={tree.title}>
-                  {tree.title}
+                <h1 className="font-semibold text-gray-700 text-sm truncate" title={tree.display_title || tree.title}>
+                  {tree.display_title || tree.title}
                 </h1>
               </div>
 
@@ -1651,6 +1678,7 @@ function App() {
               handleSendMessage(question);
             }}
             onClearHistory={handleClearHistory}
+            onOpenDebug={() => setShowConversationDebug(true)}
             isReasoning={isReasoning}
             messages={messages}
           />
@@ -1736,6 +1764,125 @@ function App() {
         onSave={handleSettingsSave}
         currentSettings={apiSettings}
       />
+
+      {/* Backup Manager Modal */}
+      {currentDocumentId && (
+        <BackupManager
+          documentId={currentDocumentId}
+          isOpen={showBackupManager}
+          onClose={() => setShowBackupManager(false)}
+          onRestoreSuccess={async () => {
+            // Reload tree and audit suggestions after restore
+            if (currentDocumentId) {
+              try {
+                const restoredTree = await getDocumentTree(currentDocumentId);
+                setTree(restoredTree);
+                
+                // Reload audit suggestions
+                try {
+                  const auditReport = await getAuditReport(currentDocumentId, { status: 'pending' });
+                  setAuditSuggestions(auditReport.suggestions.map(s => ({
+                    ...s,
+                    action: s.action as 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND'
+                  })));
+                } catch {
+                  setAuditSuggestions([]);
+                }
+              } catch (err) {
+                console.error('Failed to reload tree after restore:', err);
+              }
+            }
+          }}
+        />
+      )}
+
+      {/* Conversation Debug Modal */}
+      <ConversationDebugModal
+        isOpen={showConversationDebug}
+        onClose={() => setShowConversationDebug(false)}
+        documentId={currentDocumentId}
+      />
+
+      {/* Parse Debug Viewer Modal */}
+      {showParseDebug && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            width: '90%',
+            maxWidth: '1200px',
+            height: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 4px 30px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #e0e0e0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>
+                Parse 调试日志
+              </h2>
+              <button
+                onClick={() => setShowParseDebug(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#666',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  padding: '4px 8px'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <ParseDebugViewer documentId={currentDocumentId} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Parse Debug Button */}
+      {currentDocumentId && (
+        <button
+          onClick={() => setShowParseDebug(true)}
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            padding: '10px 16px',
+            backgroundColor: '#673ab7',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '500',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            zIndex: 100
+          }}
+          title="查看 Parse 调试日志"
+        >
+          Parse 日志
+        </button>
+      )}
     </div>
   );
 }

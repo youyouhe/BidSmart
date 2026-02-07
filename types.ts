@@ -5,6 +5,8 @@ export interface Node {
   level: number;
   children: Node[];
   summary?: string; // Optional summary from remote API
+  display_title?: string; // Cleaned title with id prepended for UI display (e.g., "1 项目概况")
+  is_noise?: boolean; // Whether this is an invalid entry (headers, footers, metadata)
   page_start?: number; // PDF: starting page number (1-based)
   page_end?: number; // PDF: ending page number (1-based)
   line_start?: number; // Markdown: starting line number
@@ -41,6 +43,8 @@ export interface RemoteChatResponse {
   debug_path: string[];
   provider: string;
   model: string;
+  system_prompt?: string; // System prompt used for generating the response
+  raw_output?: string; // Raw LLM output (truncated to 500 chars)
 }
 
 export interface HealthCheckResponse {
@@ -84,6 +88,8 @@ export interface ChatResponse {
   debug_path: string[];
   provider?: string; // Remote API only
   model?: string; // Remote API only
+  system_prompt?: string; // System prompt used for generating the response
+  raw_output?: string; // Raw LLM output (truncated to 500 chars)
 }
 
 export interface Message {

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr \":8003\")",
+      "Bash(findstr:*)",
+      "Bash(wmic process:*)"
+    ]
+  }
+}

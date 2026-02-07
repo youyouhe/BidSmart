@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Trash2 } from 'lucide-react';
+import { Send, Sparkles, Trash2, Bug } from 'lucide-react';
 import { Node, Message } from '../types';
 
 interface DocChatPanelProps {
   documentTree: Node;
   onSendMessage?: (question: string) => void;
   onClearHistory?: () => void;
+  onOpenDebug?: () => void;
   isReasoning?: boolean;
   messages?: Message[];
 }
@@ -14,6 +15,7 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
   documentTree,
   onSendMessage,
   onClearHistory,
+  onOpenDebug,
   isReasoning = false,
   messages = []
 }) => {
@@ -25,9 +27,9 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
     console.log('[DocChatPanel] Rendered with:', {
       hasOnClearHistory: !!onClearHistory,
       messagesCount: messages.length,
-      documentTitle: documentTree.title
+      documentTitle: documentTree.display_title || documentTree.title
     });
-  }, [onClearHistory, messages.length, documentTree.title]);
+  }, [onClearHistory, messages.length, documentTree.display_title, documentTree.title]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -60,7 +62,24 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
       <div className="p-4 border-b border-gray-200 bg-white">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {onClearHistory ? (
+            <h2 className="text-gray-800 font-bold flex items-center gap-2">
+              <Sparkles size={18} className="text-blue-600" />
+              文档助手
+            </h2>
+          </div>
+          <div className="flex items-center gap-2">
+            {onOpenDebug && (
+              <button
+                onClick={onOpenDebug}
+                disabled={isReasoning}
+                className="flex items-center gap-1 px-2 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="调试工具"
+              >
+                <Bug size={14} />
+                <span>调试</span>
+              </button>
+            )}
+            {onClearHistory && (
               <button
                 onClick={handleClear}
                 disabled={isReasoning}
@@ -70,11 +89,7 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
                 <Trash2 size={14} />
                 <span>清空</span>
               </button>
-            ) : null}
-            <h2 className="text-gray-800 font-bold flex items-center gap-2">
-              <Sparkles size={18} className="text-blue-600" />
-              文档助手
-            </h2>
+            )}
           </div>
         </div>
         <div className="text-xs text-gray-500 mt-2 flex items-center gap-2">
@@ -153,7 +168,7 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
         </div>
         <div className="mt-2">
           <p className="text-[10px] text-gray-400 text-center">
-            基于 {documentTree.title} 的智能问答
+            基于 {documentTree.display_title || documentTree.title} 的智能问答
           </p>
         </div>
       </div>

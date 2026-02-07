@@ -7,7 +7,7 @@ export interface ApiSettings {
 }
 
 const DEFAULT_SETTINGS: ApiSettings = {
-  endpoint: 'http://192.168.8.107:8003',
+  endpoint: 'http://localhost:8003',  // Changed from 192.168.8.107 to localhost
   token: ''
 };
 

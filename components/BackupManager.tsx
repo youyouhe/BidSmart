@@ -42,9 +42,7 @@ const BackupManager: React.FC<BackupManagerProps> = ({
     setError(null);
 
     try {
-      console.log('[BackupManager] Loading backups for document:', documentId);
       const response = await getAuditBackups(documentId);
-      console.log('[BackupManager] Received backups:', response);
       setBackups(response.backups);
     } catch (err) {
       console.error('[BackupManager] Failed to load backups:', err);
@@ -119,7 +117,9 @@ const BackupManager: React.FC<BackupManagerProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">

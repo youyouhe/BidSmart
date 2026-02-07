@@ -12,7 +12,7 @@ interface ContextMenuProps {
   onBatchAcceptSameAction?: () => void;
   onBatchRejectSameAction?: () => void;
   onViewDetails?: () => void;
-  suggestionAction?: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE';
+  suggestionAction?: 'DELETE' | 'ADD' | 'MODIFY_FORMAT' | 'MODIFY_PAGE' | 'EXPAND';
   suggestionReason?: string;
   confidence?: string;
   sameConfidenceCount?: number;
@@ -95,6 +95,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         return '修改格式';
       case 'MODIFY_PAGE':
         return '修改页码';
+      case 'EXPAND':
+        return '扩展分析';
       default:
         return '修改';
     }
@@ -136,6 +138,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         return '格式修改';
       case 'MODIFY_PAGE':
         return '页码修改';
+      case 'EXPAND':
+        return '扩展分析';
       default:
         return '此类操作';
     }
