@@ -1,0 +1,26 @@
+{
+  "company_name": "示例科技有限公司",
+  "legal_representative": "张三",
+  "registration_number": "91110000XXXXXXXXXX",
+  "address": "北京市海淀区中关村科技园XX号",
+  "phone": "010-12345678",
+  "fax": "010-12345679",
+  "email": "bid@example.com",
+  "website": "https://www.example.com",
+  "established_date": "2010-01-01",
+  "registered_capital": "5000万元",
+  "qualifications": [
+    "信息系统集成及服务资质（二级）",
+    "ISO 9001:2015 质量管理体系认证",
+    "ISO 27001 信息安全管理体系认证",
+    "CMMI 5级认证",
+    "高新技术企业"
+  ],
+  "bank_info": {
+    "bank_name": "中国工商银行北京分行",
+    "account_name": "示例科技有限公司",
+    "account_number": "0200XXXXXXXXXXXX"
+  },
+  "business_scope": "计算机软硬件开发、销售；信息系统集成服务；技术咨询、技术服务",
+  "_instructions": "请根据实际公司信息修改以上字段"
+}

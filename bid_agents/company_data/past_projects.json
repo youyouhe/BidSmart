@@ -1,0 +1,41 @@
+[
+  {
+    "project_name": "XX市政务云平台建设项目",
+    "client": "XX市大数据管理局",
+    "contract_value": 2800,
+    "currency": "万元",
+    "start_date": "2022-03-01",
+    "end_date": "2023-06-30",
+    "status": "completed",
+    "domain": "IT",
+    "description": "为XX市搭建统一的政务云平台，包含IaaS、PaaS和SaaS三层架构",
+    "technologies": ["OpenStack", "Kubernetes", "微服务架构", "国产化适配"],
+    "team_size": 25
+  },
+  {
+    "project_name": "XX银行核心系统升级项目",
+    "client": "XX银行股份有限公司",
+    "contract_value": 4500,
+    "currency": "万元",
+    "start_date": "2021-08-01",
+    "end_date": "2023-02-28",
+    "status": "completed",
+    "domain": "金融",
+    "description": "对核心银行系统进行国产化改造和升级，实现关键业务系统的自主可控",
+    "technologies": ["分布式数据库", "国产中间件", "高可用架构"],
+    "team_size": 40
+  },
+  {
+    "project_name": "XX省大数据分析平台",
+    "client": "XX省发展和改革委员会",
+    "contract_value": 1500,
+    "currency": "万元",
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31",
+    "status": "completed",
+    "domain": "IT",
+    "description": "建设省级大数据分析平台，支持跨部门数据共享和智能分析",
+    "technologies": ["Hadoop", "Spark", "数据治理", "可视化大屏"],
+    "team_size": 15
+  }
+]

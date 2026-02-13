@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { Clock, RotateCcw, FileText, AlertCircle, X } from 'lucide-react';
 import { getAuditBackups, restoreFromBackup } from '../services/apiService';
 
@@ -64,7 +65,7 @@ const BackupManager: React.FC<BackupManagerProps> = ({
       const result = await restoreFromBackup(documentId, backupId);
       console.log('Restore result:', result);
       
-      alert(`✅ ${result.message}\n恢复了 ${result.node_count} 个节点`);
+      toast.success(`${result.message}（恢复了 ${result.node_count} 个节点）`);
       
       // Reload backups list to show the new backup
       await loadBackups();

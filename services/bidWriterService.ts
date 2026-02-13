@@ -2,6 +2,57 @@ import { TenderProject, TenderSection, TenderOutline, ExportConfig, RewriteReque
 import { chatWithDocument } from './apiService';
 import { generateSectionContentPrompt, generateRewritePrompt, generateOutlinePrompt } from '../utils/promptTemplates';
 import { extractJSONFromResponse, validateOutlineSections } from '../utils/jsonParser';
+import {
+  createProject as apiCreateProject,
+  getProject as apiGetProject,
+  listProjects as apiListProjects,
+  updateProject as apiUpdateProject,
+  rewriteBidText,
+  autoSaveSection as apiAutoSaveSection,
+  exportProjectToWord,
+} from './projectService';
+
+// =============================================================================
+// Backend ↔ Frontend format conversion (snake_case ↔ camelCase)
+// =============================================================================
+
+function toBackendSection(s: TenderSection): Record<string, unknown> {
+  return {
+    id: s.id,
+    title: s.title,
+    content: s.content,
+    summary: s.summary || '',
+    requirement_references: s.requirementReferences,
+    status: s.status,
+    order: s.order,
+    word_count: s.content.length,
+  };
+}
+
+function fromBackendSection(s: Record<string, unknown>): TenderSection {
+  return {
+    id: s.id as string,
+    title: s.title as string,
+    content: (s.content as string) || '',
+    summary: (s.summary as string) || '',
+    requirementReferences: (s.requirement_references as string[]) || [],
+    status: (s.status as TenderSection['status']) || 'pending',
+    order: (s.order as number) || 0,
+  };
+}
+
+function fromBackendProject(data: Record<string, unknown>): TenderProject {
+  return {
+    id: data.id as string,
+    title: data.title as string,
+    tenderDocumentId: data.tender_document_id as string,
+    tenderDocumentTree: data.tender_document_tree as Node,
+    sections: ((data.sections as Record<string, unknown>[]) || []).map(fromBackendSection),
+    createdAt: data.created_at as number,
+    updatedAt: data.updated_at as number,
+    status: (data.status as TenderProject['status']) || 'draft',
+  };
+}
 
 /**
  * Generate tender bid outline based on tender document tree
@@ -40,22 +91,58 @@ export async function generateOutline(
       attachments: mappedAttachments
     };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('大纲生成失败:', error);
 
+    const message = error instanceof Error ? error.message : String(error);
+
     // User-friendly error messages
-    if (error.message.includes('空响应')) {
+    if (message.includes('空响应')) {
       throw new Error('AI 返回空响应，请重试');
     }
-    if (error.message.includes('JSON') || error.message.includes('json')) {
+    if (message.includes('JSON') || message.includes('json')) {
       throw new Error('AI 返回格式不正确，请重试');
     }
-    if (error.message.includes('章节')) {
+    if (message.includes('章节')) {
       throw new Error('生成的大纲不完整，请尝试简化您的要求');
     }
 
-    throw new Error(`大纲生成失败: ${error.message}`);
+    throw new Error(`大纲生成失败: ${message}`);
   }
+}
+
+/**
+ * Generate outline via multi-agent pipeline (format-extractor → outline-planner).
+ * Returns immediately with a projectId; actual generation runs in backend.
+ * Subscribe to WebSocket status updates using the returned projectId.
+ */
+export async function generateOutlineViaAgents(
+  tenderDocumentTree: Node,
+  tenderDocumentId: string,
+  title: string,
+  userRequirements?: string,
+  attachmentNames?: string[],
+): Promise<{ projectId: string }> {
+  const API_BASE_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_PAGEINDEX_API_URL || 'http://192.168.8.107:8003');
+  const response = await fetch(`${API_BASE_URL}/api/bid/outline/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tender_document_id: tenderDocumentId,
+      tender_document_tree: tenderDocumentTree,
+      title,
+      user_requirements: userRequirements || null,
+      attachment_names: attachmentNames || null,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Agent outline generation failed: ${err}`);
+  }
+
+  const data = await response.json();
+  return { projectId: data.project_id };
 }
 
 /**
@@ -69,14 +156,16 @@ export async function generateSectionContent(
   previousContext?: string,
   attachments?: string[],
   aiConfig?: AIConfig,
-  documentId?: string
+  documentId?: string,
+  sectionDescription?: string,
+  requirementReferences?: string[]
 ): Promise<string> {
   // Build the prompt using templates
   const prompt = generateSectionContentPrompt(
     sectionTitle,
-    '', // description
+    sectionDescription || '',
     tenderTree,
-    [], // requirementReferences
+    requirementReferences || [],
     previousContext,
     userPrompt,
     attachments
@@ -94,83 +183,96 @@ export async function generateSectionContent(
 }
 
 /**
- * Rewrite text using AI
+ * Rewrite text using AI (calls backend /api/bid/content/rewrite)
  */
 export async function rewriteText(
   text: string,
   mode: RewriteRequest['mode'],
   context?: string,
-  aiConfig?: AIConfig
+  _aiConfig?: AIConfig
 ): Promise<string> {
-  // Build the rewrite prompt
-  const prompt = generateRewritePrompt(text, mode, context);
+  const result = await rewriteBidText({ text, mode, context });
+  return result.rewritten_text;
+}
 
+/**
+ * Save tender project to backend.
+ * Creates if not yet persisted, updates if already exists.
+ * Returns the project with backend-assigned ID.
+ */
+export async function saveProject(project: TenderProject): Promise<TenderProject> {
   try {
-    // Since rewrite doesn't require document context, we could use a simpler API
-    // For now, return a mock response with proper prefix
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    const modePrefixes: Record<string, string> = {
-      'formal': '经审慎核实，',
-      'concise': '简言之，',
-      'expand': '详细说明如下：',
-      'clarify': '明确指出，'
-    };
-
-    return modePrefixes[mode] + text;
-  } catch (error) {
-    console.error('Failed to rewrite text:', error);
-    throw error;
+    // Try update first (project already on backend)
+    const result = await apiUpdateProject(project.id, {
+      id: project.id,
+      title: project.title,
+      tender_document_id: project.tenderDocumentId,
+      tender_document_tree: project.tenderDocumentTree,
+      sections: project.sections.map(toBackendSection),
+      status: project.status,
+      created_at: project.createdAt,
+      updated_at: Date.now(),
+    } as any);
+    return fromBackendProject(result as any);
+  } catch {
+    // Update failed (likely 404) — create new project
+    const result = await apiCreateProject({
+      title: project.title,
+      tender_document_id: project.tenderDocumentId,
+      tender_document_tree: project.tenderDocumentTree as any,
+      sections: project.sections.map(toBackendSection) as any,
+    });
+    return fromBackendProject(result as any);
   }
 }
 
 /**
- * Save tender project
- */
-export async function saveProject(project: TenderProject): Promise<void> {
-  // TODO: Implement with actual API call
-  console.log('Saving project:', project);
-  await new Promise(resolve => setTimeout(resolve, 500));
-}
-
-/**
- * Load tender project
+ * Load tender project from backend
  */
 export async function loadProject(projectId: string): Promise<TenderProject> {
-  // TODO: Implement with actual API call
-  throw new Error('Not implemented yet');
+  const result = await apiGetProject(projectId);
+  return fromBackendProject(result as any);
 }
 
 /**
- * List all projects
+ * List all projects from backend
  */
 export async function listProjects(): Promise<TenderProject[]> {
-  // TODO: Implement with actual API call
-  return [];
+  const results = await apiListProjects();
+  return (results as any[]).map(fromBackendProject);
 }
 
 /**
- * Export document
+ * Auto-save a single section's content to backend
+ */
+export async function autoSaveSectionContent(
+  projectId: string,
+  sectionId: string,
+  content: string,
+): Promise<void> {
+  await apiAutoSaveSection(projectId, sectionId, content);
+}
+
+/**
+ * Export project as Word document
  */
 export async function exportDocument(
   projectId: string,
   config: ExportConfig
 ): Promise<Blob> {
-  // TODO: Implement with actual API call
-  // For now, return a mock blob
-
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
-  const mockContent = `投标文件\n\n导出时间：${new Date().toLocaleString('zh-CN')}\n格式：${config.format}`;
-  return new Blob([mockContent], { type: 'text/plain' });
+  return exportProjectToWord(projectId, {
+    format: config.format,
+    include_outline: config.includeOutline,
+    include_requirements: config.includeRequirements,
+  });
 }
 
 /**
  * Convert outline to tender sections
  */
 export function convertOutlineToSections(outline: TenderOutline): TenderSection[] {
-  return outline.sections.map(section => ({
-    id: section.id,
+  return outline.sections.map((section, index) => ({
+    id: `section-${Date.now()}-${index}`,
     title: section.title,
     content: '',
     summary: section.description,
@@ -178,4 +280,60 @@ export function convertOutlineToSections(outline: TenderOutline): TenderSection[
     status: 'pending',
     order: section.order
   }));
+}
+
+// =============================================================================
+// Agent-based Content Writing & Review
+// =============================================================================
+
+const API_BASE_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_PAGEINDEX_API_URL || 'http://192.168.8.107:8003');
+
+/**
+ * Write section content via multi-agent pipeline.
+ * Returns immediately; subscribe to WebSocket for progress.
+ *
+ * @param projectId - The project to write content for
+ * @param sectionIds - Specific section IDs (null = all pending)
+ */
+export async function writeContentViaAgents(
+  projectId: string,
+  sectionIds?: string[],
+): Promise<{ projectId: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/bid/projects/${projectId}/content/write`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      section_ids: sectionIds || null,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Agent content writing failed: ${err}`);
+  }
+
+  const data = await response.json();
+  return { projectId: data.project_id };
+}
+
+/**
+ * Review bid document via multi-agent pipeline (review-agent → compliance-checker).
+ * Returns immediately; subscribe to WebSocket for progress.
+ */
+export async function reviewViaAgents(
+  projectId: string,
+): Promise<{ projectId: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/bid/projects/${projectId}/review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Agent review failed: ${err}`);
+  }
+
+  const data = await response.json();
+  return { projectId: data.project_id };
 }

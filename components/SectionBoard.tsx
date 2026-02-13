@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { FileText, CheckCircle2, Clock, AlertCircle, ChevronRight } from 'lucide-react';
+import { FileText, CheckCircle2, Clock, AlertCircle, ChevronRight, ListRestart } from 'lucide-react';
 import { TenderSection, Node } from '../types';
 import { clsx } from 'clsx';
 
@@ -8,6 +8,7 @@ interface SectionBoardProps {
   activeSectionId: string | null;
   onSectionSelect: (sectionId: string) => void;
   tenderDocumentTree: Node;
+  onReEditOutline?: () => void;
 }
 
 // Helper to count words (supporting CJK)
@@ -44,7 +45,8 @@ const SectionBoard: React.FC<SectionBoardProps> = ({
   sections,
   activeSectionId,
   onSectionSelect,
-  tenderDocumentTree
+  tenderDocumentTree,
+  onReEditOutline
 }) => {
   const sortedSections = useMemo(() => {
     return [...sections].sort((a, b) => a.order - b.order);
@@ -65,30 +67,57 @@ const SectionBoard: React.FC<SectionBoardProps> = ({
           <FileText size={18} />
           投标文件大纲
         </h2>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <div className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
             {sections.length} 章节
           </div>
-          <div className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded">
-            {completedCount} 完成
-          </div>
+          {onReEditOutline && (
+            <button
+              onClick={onReEditOutline}
+              className="text-xs text-purple-600 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 px-2 py-0.5 rounded flex items-center gap-1 transition-colors"
+              title="重新编辑大纲"
+            >
+              <ListRestart size={12} />
+              编辑大纲
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Progress Bar */}
-      <div className="h-1 bg-gray-200 flex-shrink-0">
-        <div
-          className="h-full bg-green-500 transition-all duration-300"
-          style={{ width: `${(completedCount / sections.length) * 100}%` }}
-        />
+      {/* Progress Bar — multi-segment: green (completed) + blue (in_progress) */}
+      <div className="h-1.5 bg-gray-200 flex-shrink-0">
+        <div className="h-full flex">
+          <div
+            className="h-full bg-green-500 transition-all duration-300"
+            style={{ width: `${sections.length > 0 ? (completedCount / sections.length) * 100 : 0}%` }}
+          />
+          <div
+            className="h-full bg-blue-400 transition-all duration-300"
+            style={{ width: `${sections.length > 0 ? (inProgressCount / sections.length) * 100 : 0}%` }}
+          />
+        </div>
       </div>
 
       {/* Stats */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 flex-shrink-0">
         <div className="flex items-center justify-between text-xs text-gray-500">
           <span>总字数: {totalWords.toLocaleString()}</span>
-          <span>
-            完成: {completedCount} | 进行中: {inProgressCount} | 待编写: {sections.length - completedCount - inProgressCount}
+          <span className="font-medium">
+            {sections.length > 0 ? Math.round((completedCount / sections.length) * 100) : 0}% 完成
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] text-gray-400 mt-1">
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+            完成 {completedCount}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />
+            编写中 {inProgressCount}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-gray-300 inline-block" />
+            待编写 {sections.length - completedCount - inProgressCount}
           </span>
         </div>
       </div>

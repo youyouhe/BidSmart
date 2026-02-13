@@ -19,7 +19,7 @@ const API_BASE_URL = IS_DEV ? '' : REMOTE_API_URL;
 export interface CreateProjectRequest {
   title: string;
   tender_document_id: string;
-  tender_document_tree: any;
+  tender_document_tree: Record<string, unknown>;
   sections: TenderSection[];
 }
 
@@ -205,4 +205,35 @@ export const rewriteBidText = async (params: {
   }
 
   return await response.json();
+};
+
+// ====================
+// Export Operations
+// ====================
+
+/**
+ * Export a project as Word document
+ */
+export const exportProjectToWord = async (
+  projectId: string,
+  config: {
+    format: 'word' | 'pdf';
+    include_outline: boolean;
+    include_requirements: boolean;
+  }
+): Promise<Blob> => {
+  const response = await fetch(`${API_BASE_URL}/api/bid/projects/${projectId}/export`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(config),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || error.message || `Export failed: ${response.statusText}`);
+  }
+
+  return await response.blob();
 };

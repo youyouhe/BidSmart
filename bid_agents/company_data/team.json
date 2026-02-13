@@ -1,0 +1,32 @@
+[
+  {
+    "name": "李四",
+    "role": "项目经理",
+    "title": "高级项目经理",
+    "certifications": ["PMP", "信息系统项目管理师（高级）"],
+    "years_experience": 12,
+    "education": "硕士/计算机科学",
+    "key_projects": ["XX市政务云平台建设", "XX银行核心系统升级"],
+    "description": "12年项目管理经验，主导过10余个大型IT项目"
+  },
+  {
+    "name": "王五",
+    "role": "技术总监",
+    "title": "首席架构师",
+    "certifications": ["系统架构设计师（高级）", "AWS Solutions Architect"],
+    "years_experience": 15,
+    "education": "硕士/软件工程",
+    "key_projects": ["XX省大数据平台", "XX集团混合云架构设计"],
+    "description": "15年技术架构经验，擅长分布式系统和云原生架构设计"
+  },
+  {
+    "name": "赵六",
+    "role": "质量经理",
+    "title": "高级质量工程师",
+    "certifications": ["ISO 9001内审员", "ISTQB高级测试管理"],
+    "years_experience": 10,
+    "education": "本科/软件工程",
+    "key_projects": ["XX市智慧城市项目质量保障", "XX银行系统测试"],
+    "description": "10年质量管理经验，负责过20余个项目的质量控制工作"
+  }
+]

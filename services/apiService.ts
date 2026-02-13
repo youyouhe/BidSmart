@@ -16,7 +16,19 @@ import {
   UploadDocumentResponse,
   ParseStatus,
   GalleryItem,
-  PerformanceStats
+  PerformanceStats,
+  TimelineEntry,
+  TimelineMilestone,
+  TimelineListResponse,
+  DocumentSet,
+  DocumentSetResponse,
+  DocumentSetListResponse,
+  CreateDocumentSetRequest,
+  DocumentSetQueryRequest,
+  DocumentSetQueryResponse,
+  MergedTreeResponse,
+  DocumentComparisonRequest,
+  DocumentComparisonResponse,
 } from '../types';
 import { subscribeToDocumentStatus, DocumentWebSocket, WebSocketCallbacks } from './websocketService';
 import { loadSettings, type ApiSettings } from '../components/SettingsModal';
@@ -211,6 +223,7 @@ export const chatWithDocument = async (
     model: data.model,
     system_prompt: data.system_prompt, // Include system prompt for debugging
     raw_output: data.raw_output, // Include raw output for debugging
+    tool_call: data.tool_call, // Pass through tool call result
   };
 };
 
@@ -1140,6 +1153,394 @@ export const restoreFromBackup = async (
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Unknown error" }));
     throw new Error(error.detail || `Failed to restore backup: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+// =============================================================================
+// Timeline API Functions
+// =============================================================================
+
+/**
+ * List all timeline entries, optionally filtered by document ID and budget range
+ */
+export const listTimelineEntries = async (
+  documentId?: string,
+  budgetMin?: number,
+  budgetMax?: number,
+): Promise<TimelineListResponse> => {
+  const params = new URLSearchParams();
+  if (documentId) params.append('document_id', documentId);
+  if (budgetMin !== undefined) params.append('budget_min', budgetMin.toString());
+  if (budgetMax !== undefined) params.append('budget_max', budgetMax.toString());
+
+  const queryStr = params.toString();
+  const url = `${getApiBaseUrl()}/api/timeline/${queryStr ? '?' + queryStr : ''}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to list timeline entries: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Create a new timeline entry
+ */
+export const createTimelineEntry = async (data: {
+  document_id: string;
+  project_name: string;
+  start_date?: string;
+  end_date?: string;
+  milestones?: TimelineMilestone[];
+  notes?: string;
+}): Promise<TimelineEntry> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/timeline/`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to create timeline entry: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Update a timeline entry
+ */
+export const updateTimelineEntry = async (
+  entryId: string,
+  data: Partial<{
+    project_name: string;
+    start_date: string;
+    end_date: string;
+    milestones: TimelineMilestone[];
+    notes: string;
+  }>
+): Promise<TimelineEntry> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/timeline/${entryId}`, {
+    method: 'PATCH',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to update timeline entry: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Delete a timeline entry
+ */
+export const deleteTimelineEntry = async (entryId: string): Promise<{ id: string; deleted: boolean }> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/timeline/${entryId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to delete timeline entry: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+// =============================================================================
+// DocumentSet API Functions
+// =============================================================================
+
+/**
+ * Create a new document set
+ */
+export const createDocumentSet = async (
+  data: CreateDocumentSetRequest
+): Promise<DocumentSetResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to create document set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Transform snake_case to camelCase
+ */
+const transformToCamelCase = (obj: any): any => {
+  if (Array.isArray(obj)) {
+    return obj.map(item => transformToCamelCase(item));
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.keys(obj).reduce((acc, key) => {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+      acc[camelKey] = transformToCamelCase(obj[key]);
+      return acc;
+    }, {} as any);
+  }
+  return obj;
+};
+
+/**
+ * Get a document set by ID
+ */
+export const getDocumentSet = async (id: string): Promise<DocumentSetResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${id}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to get document set: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return transformToCamelCase(data);
+};
+
+/**
+ * List all document sets
+ */
+export const listDocumentSets = async (): Promise<DocumentSetListResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to list document sets: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return transformToCamelCase(data);
+};
+
+/**
+ * Update a document set
+ */
+export const updateDocumentSet = async (
+  id: string,
+  data: Partial<CreateDocumentSetRequest>
+): Promise<DocumentSetResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${id}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to update document set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Delete a document set
+ */
+export const deleteDocumentSet = async (id: string): Promise<{ id: string; deleted: boolean }> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to delete document set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Add a document to a document set
+ */
+export const addDocumentToSet = async (
+  setId: string,
+  documentId: string,
+  name: string,
+  docType: string,
+  role: string = 'auxiliary'
+): Promise<DocumentSetResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${setId}/items`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      document_id: documentId,
+      name,
+      doc_type: docType,
+      role,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to add document to set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Remove a document from a document set
+ */
+export const removeDocumentFromSet = async (
+  setId: string,
+  documentId: string
+): Promise<DocumentSetResponse> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/document-sets/${setId}/items/${documentId}`,
+    {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to remove document from set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Query across documents in a set
+ */
+export const queryDocumentSet = async (
+  setId: string,
+  request: DocumentSetQueryRequest
+): Promise<DocumentSetQueryResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${setId}/query`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to query document set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Chat with documents in a set using LLM
+ */
+export interface DocumentSetChatRequest {
+  question: string;
+  history?: Array<{ role: string; content: string }>;
+}
+
+export interface DocumentSetChatResponse {
+  answer: string;
+  sources: Array<{
+    node_id: string;
+    node_title: string;
+    relevance: number;
+    content?: string;
+  }>;
+  debug?: any;
+}
+
+export const chatDocumentSet = async (
+  setId: string,
+  request: DocumentSetChatRequest
+): Promise<DocumentSetChatResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${setId}/chat`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to chat with document set: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Get merged tree view of a document set
+ */
+export const getMergedTree = async (setId: string): Promise<MergedTreeResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${setId}/merge`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to get merged tree: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Compare two documents in a set
+ */
+export const compareDocuments = async (
+  setId: string,
+  request: DocumentComparisonRequest
+): Promise<DocumentComparisonResponse> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/document-sets/${setId}/compare`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to compare documents: ${response.statusText}`);
+  }
+
+  return await response.json();
+};
+
+/**
+ * Set primary document for a document set
+ */
+export const setPrimaryDocument = async (
+  setId: string,
+  documentId: string
+): Promise<DocumentSetResponse> => {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/document-sets/${setId}/primary`,
+    {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ document_id: documentId }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Failed to set primary document: ${response.statusText}`);
   }
 
   return await response.json();

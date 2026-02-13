@@ -19,14 +19,15 @@ export default defineConfig(({ mode }) => {
             target: env.VITE_PAGEINDEX_API_URL || 'http://localhost:8003',
             changeOrigin: true,
             ws: true,
+          },
+          // Proxy OCR service requests
+          '/ocr': {
+            target: env.VITE_OCR_SERVICE_URL || 'http://localhost:8010',
+            changeOrigin: true,
           }
         }
       },
       plugins: [react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

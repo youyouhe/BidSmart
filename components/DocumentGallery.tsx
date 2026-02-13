@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Search, FileText, Calendar, Filter, Trash2, RefreshCw, BarChart3, Settings, ChevronDown, ChevronUp, Server, UploadCloud } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { ArrowLeft, Search, FileText, Calendar, Filter, Trash2, RefreshCw, BarChart3, Settings, ChevronDown, ChevronUp, Server, UploadCloud, Clock, Building2, CheckSquare, Layers, FolderOpen } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { listDocuments, transformToGalleryItems, deleteDocument, reparseDocument, getDocument, categorizeDocument } from '../services/apiService';
 import { websocketManager, WebSocketCallbacks, StatusUpdateMessage } from '../services/websocketService';
 import { GalleryItem, ParseStatus, PerformanceStats } from '../types';
 import LanguageSwitcher from './LanguageSwitcher';
 import PerformanceModal from './PerformanceModal';
+import ProjectTimeline from './ProjectTimeline';
+import { useTimeline } from '../hooks/useTimeline';
 import { clsx } from 'clsx';
+import DocumentSetManager from './DocumentSetManager';
+import DocumentSetCreator from './DocumentSetCreator';
+import DocumentSetDetail from './DocumentSetDetail';
 
 // Track progress for each document
 interface DocumentProgress {
@@ -14,25 +20,33 @@ interface DocumentProgress {
   progress: number;
   stage: string;
   message: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, string | number | boolean | undefined>;
 }
 
 interface DocumentGalleryProps {
   onBack?: () => void;
-  onSelectDocument?: (id: string) => void;
-  onLoadDocument?: (documentTree: DocumentTree) => void;
+  onSelect?: (id: string) => void;
+  onLoadDocument?: (id: string) => Promise<void>;
   onUpload?: (
-    file: File, 
-    customPrompt?: string, 
+    file: File,
+    customPrompt?: string,
     useDocumentToc?: 'auto' | 'yes' | 'no',
     enableAudit?: boolean,
     auditMode?: 'progressive' | 'standard',
     auditConfidence?: number
   ) => void;
   onOpenApiSettings?: () => void;
+  onOpenCompanyData?: () => void;
+  onNavigateToBidWriter?: (id: string) => Promise<void>;
   newlyUploadedDocumentId?: string | null;
   isUploading?: boolean;
   embeddedMode?: boolean;
+  // Multi-document selection
+  isSelectionMode?: boolean;
+  selectedDocumentIds?: string[];
+  onToggleDocumentSelection?: (id: string) => void;
+  onStartMergedAnalysis?: () => void;
+  onToggleSelectionMode?: () => void;
 }
 
 const DocumentGallery: React.FC<DocumentGalleryProps> = ({
@@ -41,9 +55,16 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
   onLoadDocument,
   onUpload,
   onOpenApiSettings,
+  onOpenCompanyData,
+  onNavigateToBidWriter,
   newlyUploadedDocumentId,
   isUploading = false,
-  embeddedMode = false
+  embeddedMode = false,
+  isSelectionMode = false,
+  selectedDocumentIds = [],
+  onToggleDocumentSelection,
+  onStartMergedAnalysis,
+  onToggleSelectionMode,
 }) => {
   const { t } = useLanguage();
   const [items, setItems] = useState<GalleryItem[]>([]);
@@ -77,6 +98,18 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
   // Document progress tracking
   const [documentProgress, setDocumentProgress] = useState<Record<string, DocumentProgress>>({});
 
+  // Tab state: 'documents' or 'timeline'
+  const [activeTab, setActiveTab] = useState<'documents' | 'timeline' | 'documentSets'>('documents');
+
+  // Timeline state
+  const timeline = useTimeline();
+
+  // DocumentSet state
+  const [showDocumentSetCreator, setShowDocumentSetCreator] = useState(false);
+  const [selectedDocumentSetId, setSelectedDocumentSetId] = useState<string | null>(null);
+  const [showDocumentSetDetail, setShowDocumentSetDetail] = useState(false);
+  const [documentSetRefreshKey, setDocumentSetRefreshKey] = useState(0);
+
   // Category editing state
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editedCategory, setEditedCategory] = useState('');
@@ -87,6 +120,13 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
 
   // WebSocket connection tracking
   const webSocketConnectionsRef = useRef<Set<string>>(new Set());
+
+  // Fetch timeline entries when switching to timeline tab or changing budget filter
+  useEffect(() => {
+    if (activeTab === 'timeline') {
+      timeline.fetchEntries();
+    }
+  }, [activeTab, timeline.budgetRange]);
 
   // Cleanup WebSocket connections on unmount
   useEffect(() => {
@@ -147,9 +187,8 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
               [targetDocId]: {
                 documentId: targetDocId,
                 progress: finalProgress,
-                stage: update.metadata?.stage || 'Processing...',
-                message: update.metadata?.message || update.metadata?.stage || 'Processing...',
-                metadata: update.metadata
+                stage: String(update.metadata?.stage || 'Processing...'),
+                message: String(update.metadata?.message || update.metadata?.stage || 'Processing...'),
               }
             };
             console.log('[DocumentGallery] Updated documentProgress for', targetDocId, 'progress:', currentProgress, '->', finalProgress);
@@ -170,7 +209,8 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
             if (item.id === targetDocId) {
               // Get the original document to calculate file size
               const doc = prevItems.find(i => i.id === documentId);
-              const fileSize = doc?.description.match(/[\d.]+/)?.[0] ? parseFloat(doc.description.match(/[\d.]+/)[0]!) * 1024 * 1024 : 0;
+              const fileSizeMatch = doc?.description.match(/[\d.]+/);
+              const fileSize = fileSizeMatch?.[0] ? parseFloat(fileSizeMatch[0]) * 1024 * 1024 : 0;
 
               // Create new description based on status
               const getDescription = (status: ParseStatus, fileSizeBytes: number): string => {
@@ -505,8 +545,8 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
   const handleSelectItem = async (id: string) => {
     setLoadingItemId(id);
     try {
-      await onLoadDocument(id);
-      onSelect(id);
+      await onLoadDocument?.(id);
+      onSelect?.(id);
     } catch (err) {
       console.error('Failed to load document:', err);
       setError(err instanceof Error ? err.message : 'Failed to load document');
@@ -626,6 +666,22 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
               onChange={handleFileUpload}
               className="hidden"
             />
+            {/* Multi-document analysis toggle */}
+            {onToggleSelectionMode && (
+              <button
+                onClick={onToggleSelectionMode}
+                className={clsx(
+                  "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                  isSelectionMode
+                    ? "bg-purple-100 text-purple-700 border border-purple-300"
+                    : "text-gray-600 hover:bg-gray-100 border border-gray-200"
+                )}
+                title="多文档分析"
+              >
+                <Layers size={16} />
+                <span>多文档分析</span>
+              </button>
+            )}
             <button
               onClick={() => setSettingsOpen(!settingsOpen)}
               className={clsx(
@@ -638,6 +694,16 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
               <span>Settings</span>
               {settingsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
+            {onOpenCompanyData && (
+              <button
+                onClick={onOpenCompanyData}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-amber-50 rounded-lg text-sm font-medium text-amber-600 hover:bg-amber-100 border border-amber-200 transition-colors"
+                title="公司信息管理"
+              >
+                <Building2 size={16} />
+                <span>公司信息</span>
+              </button>
+            )}
             {onOpenApiSettings && (
               <button
                 onClick={() => {
@@ -779,6 +845,97 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
         </div>
       )}
 
+      {/* Tab Bar - Documents vs Timeline */}
+      {!embeddedMode && (
+        <div className="flex items-center gap-1 px-6 py-2 bg-white border-b border-gray-200 shrink-0">
+          <button
+            onClick={() => setActiveTab('documents')}
+            className={clsx(
+              'px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5',
+              activeTab === 'documents'
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-500 hover:bg-gray-100'
+            )}
+          >
+            <FileText size={14} />
+            文档列表
+          </button>
+          <button
+            onClick={() => setActiveTab('timeline')}
+            className={clsx(
+              'px-4 py-2 text-sm font-medium rounded-md transition-colors relative flex items-center gap-1.5',
+              activeTab === 'timeline'
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-500 hover:bg-gray-100'
+            )}
+          >
+            <Clock size={14} />
+            项目时间线
+            {(timeline.expiringCount + timeline.expiredCount) > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center font-medium">
+                {timeline.expiringCount + timeline.expiredCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('documentSets')}
+            className={clsx(
+              'px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5',
+              activeTab === 'documentSets'
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-500 hover:bg-gray-100'
+            )}
+          >
+            <FolderOpen size={14} />
+            文档集
+          </button>
+        </div>
+      )}
+
+      {activeTab === 'timeline' && !embeddedMode ? (
+        <div className="flex-1 overflow-hidden">
+          <ProjectTimeline
+            entries={timeline.entries}
+            loading={timeline.loading}
+            error={timeline.error}
+            zoomLevel={timeline.zoomLevel}
+            onZoomChange={timeline.setZoomLevel}
+            budgetRange={timeline.budgetRange}
+            onBudgetChange={timeline.setBudgetRange}
+            onEntryClick={timeline.setSelectedEntryId}
+            onNavigateToDocument={(docId) => {
+              if (onLoadDocument) {
+                onLoadDocument(docId).catch(() => {
+                  toast.error('无法打开文档，请删除此条目后重新添加到时间线');
+                });
+              } else if (onSelect) {
+                onSelect(docId);
+              }
+            }}
+            onNavigateToBidWriter={onNavigateToBidWriter ? (docId) => {
+              onNavigateToBidWriter(docId).catch(() => {
+                toast.error('无法打开文档，请删除此条目后重新添加到时间线');
+              });
+            } : undefined}
+            onDeleteEntry={timeline.handleDeleteEntry}
+            selectedEntryId={timeline.selectedEntryId}
+          />
+        </div>
+      ) : activeTab === 'documentSets' ? (
+        <div className="flex-1 overflow-hidden bg-gray-50" key={documentSetRefreshKey}>
+          <DocumentSetManager
+            onCreateSet={() => setShowDocumentSetCreator(true)}
+            onViewDetail={(setId) => {
+              setSelectedDocumentSetId(setId);
+              setShowDocumentSetDetail(true);
+            }}
+            onSelectSet={(setId) => {
+              setSelectedDocumentSetId(setId);
+              setShowDocumentSetDetail(true);
+            }}
+          />
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar / Filters */}
         <div className="w-64 bg-white border-r border-gray-200 flex-col hidden md:flex">
@@ -933,12 +1090,38 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
                        ? "border-red-200 bg-red-50/30"
                        : "border-gray-200 hover:-translate-y-1 cursor-pointer"
                    )}
-                   onClick={() => item.parseStatus === 'completed' && loadingItemId !== item.id && handleSelectItem(item.id)}
+                   onClick={() => {
+                     if (item.parseStatus !== 'completed' || loadingItemId === item.id) return;
+                     if (isSelectionMode) {
+                       onToggleDocumentSelection?.(item.id);
+                     } else {
+                       handleSelectItem(item.id);
+                     }
+                   }}
                  >
-                   <div className="p-5 flex-1">
+                   <div className="p-5 flex-1 relative">
+                     {/* Multi-select checkbox */}
+                     {isSelectionMode && item.parseStatus === 'completed' && (
+                       <div
+                         className="absolute top-3 left-3 z-10"
+                         onClick={(e) => { e.stopPropagation(); onToggleDocumentSelection?.(item.id); }}
+                       >
+                         <div className={clsx(
+                           "w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-colors",
+                           selectedDocumentIds.includes(item.id)
+                             ? "bg-blue-600 border-blue-600 text-white"
+                             : "border-gray-300 bg-white hover:border-blue-400"
+                         )}>
+                           {selectedDocumentIds.includes(item.id) && (
+                             <CheckSquare size={14} className="text-white" />
+                           )}
+                         </div>
+                       </div>
+                     )}
                      <div className="flex items-start justify-between mb-3">
                        <div className={clsx(
                          "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
+                         isSelectionMode && item.parseStatus === 'completed' ? "ml-6" : "",
                          item.parseStatus === 'failed'
                            ? "bg-red-100 text-red-600"
                            : item.parseStatus === 'processing'
@@ -1116,6 +1299,29 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
            )}
         </div>
       </div>
+      )}
+
+      {/* Multi-select floating action bar */}
+      {isSelectionMode && selectedDocumentIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-gray-200 rounded-xl shadow-2xl px-6 py-3 flex items-center gap-4 z-50">
+          <span className="text-sm text-gray-600">
+            已选择 <span className="font-semibold text-gray-800">{selectedDocumentIds.length}</span> 个文档
+          </span>
+          <button
+            onClick={onStartMergedAnalysis}
+            disabled={selectedDocumentIds.length < 2}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            合并分析
+          </button>
+          <button
+            onClick={onToggleSelectionMode}
+            className="px-4 py-2 text-gray-600 text-sm hover:text-gray-800 transition-colors"
+          >
+            取消
+          </button>
+        </div>
+      )}
 
       {/* Performance Modal */}
       <PerformanceModal
@@ -1124,6 +1330,31 @@ const DocumentGallery: React.FC<DocumentGalleryProps> = ({
         isOpen={performanceModalOpen}
         onClose={() => setPerformanceModalOpen(false)}
       />
+
+      {/* DocumentSet Creator Modal */}
+      {showDocumentSetCreator && (
+        <DocumentSetCreator
+          isOpen={showDocumentSetCreator}
+          onClose={() => setShowDocumentSetCreator(false)}
+          onSuccess={() => {
+            setShowDocumentSetCreator(false);
+            setDocumentSetRefreshKey(k => k + 1);
+            toast.success('文档集创建成功');
+          }}
+        />
+      )}
+
+      {/* DocumentSet Detail Modal */}
+      {showDocumentSetDetail && selectedDocumentSetId && (
+        <DocumentSetDetail
+          setId={selectedDocumentSetId}
+          onClose={() => {
+            setShowDocumentSetDetail(false);
+            setSelectedDocumentSetId(null);
+            setDocumentSetRefreshKey(k => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 };

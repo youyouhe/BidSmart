@@ -83,6 +83,8 @@ const translations = {
   }
 };
 
+export type TranslationKey = keyof typeof translations['en'];
+
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;

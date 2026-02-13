@@ -162,8 +162,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   useEffect(() => {
     if (highlightedNodeId && pdfDoc) {
       const node = findNodeById(documentTree, highlightedNodeId);
-      if (node?.page_start) {
-        const targetPage = node.page_start;
+      if (node?.ps) {
+        const targetPage = node.ps;
         setTimeout(() => {
           const pageElement = pageRefs.current.get(targetPage);
           pageElement?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -293,7 +293,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             文档预览
           </span>
           <h2 className="text-white text-sm font-medium truncate max-w-md">
-            {documentTree.display_title || documentTree.title}
+            {documentTree.title}
           </h2>
           <div className="h-4 w-px bg-gray-600"></div>
           <span className="text-xs text-gray-400 bg-gray-700 px-2 py-1 rounded">
@@ -356,18 +356,21 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 {/* Canvas or placeholder */}
                 {rendered?.canvas ? (
                   <div
-                    dangerouslySetInnerHTML={{
-                      __html: `<canvas width="${rendered.width}" height="${rendered.height}" style="width: 100%; height: 100%; display: block;"></canvas>`
-                    }}
                     ref={el => {
                       if (el && rendered.canvas) {
-                        const canvas = el.querySelector('canvas');
-                        if (canvas) {
-                          const ctx = canvas.getContext('2d');
-                          if (ctx) {
-                            ctx.drawImage(rendered.canvas!, 0, 0);
-                          }
+                        // Clear previous content
+                        el.innerHTML = '';
+                        const canvas = document.createElement('canvas');
+                        canvas.width = rendered.width;
+                        canvas.height = rendered.height;
+                        canvas.style.width = '100%';
+                        canvas.style.height = '100%';
+                        canvas.style.display = 'block';
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                          ctx.drawImage(rendered.canvas, 0, 0);
                         }
+                        el.appendChild(canvas);
                       }
                     }}
                   />

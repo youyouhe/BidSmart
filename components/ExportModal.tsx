@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
+import toast from 'react-hot-toast';
 import { X, Download, FileText, File, Loader2, Check } from 'lucide-react';
 import { TenderProject, ExportConfig } from '../types';
-import { exportDocument } from '../services/bidWriterService';
 
 interface ExportModalProps {
   project: TenderProject;
@@ -45,7 +45,7 @@ const ExportModal: React.FC<ExportModalProps> = ({
       }, 2000);
     } catch (error) {
       console.error('Export failed:', error);
-      alert('导出失败，请稍后重试');
+      toast.error('导出失败，请稍后重试');
     } finally {
       setIsExporting(false);
     }
@@ -114,15 +114,12 @@ const ExportModal: React.FC<ExportModalProps> = ({
                 <span className="font-medium">Word (.docx)</span>
               </button>
               <button
-                onClick={() => setFormat('pdf')}
-                className={`flex items-center justify-center gap-2 p-4 rounded-lg border-2 transition-all ${
-                  format === 'pdf'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 hover:border-gray-300 text-gray-600'
-                }`}
+                disabled
+                className="flex items-center justify-center gap-2 p-4 rounded-lg border-2 transition-all border-gray-100 text-gray-300 cursor-not-allowed relative"
               >
                 <File size={20} />
                 <span className="font-medium">PDF</span>
+                <span className="absolute -bottom-1 right-1 text-[9px] text-gray-400">即将支持</span>
               </button>
             </div>
           </div>

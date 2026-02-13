@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Sparkles } from 'lucide-react';
-import { TenderSection, Node, WorkflowState, Message, AIConfig } from '../types';
+import { TenderSection, Node, WorkflowState, Message, AIConfig, ChatMessage } from '../types';
+import { chatWithDocument } from '../services/apiService';
 
 interface BidChatPanelProps {
   tenderDocumentTree: Node;
+  tenderDocumentId?: string;
   currentSection?: TenderSection;
   workflowState: WorkflowState;
   aiConfig: AIConfig;
@@ -15,6 +17,7 @@ interface BidChatPanelProps {
 
 const BidChatPanel: React.FC<BidChatPanelProps> = ({
   tenderDocumentTree,
+  tenderDocumentId,
   currentSection,
   workflowState,
   aiConfig,
@@ -63,7 +66,7 @@ const BidChatPanel: React.FC<BidChatPanelProps> = ({
     }
   }
 
-  const handleSend = async () => {
+  const handleSend = useCallback(async () => {
     if (!input.trim() || loading) return;
 
     const userMsg: Message = {
@@ -79,29 +82,39 @@ const BidChatPanel: React.FC<BidChatPanelProps> = ({
     setLoading(true);
 
     try {
-      // TODO: Integrate with actual AI service
-      // For now, provide mock responses based on workflow step
-      let responseText = '';
-
-      if (workflowState.currentStep === 'outline') {
-        responseText = '收到您的要求。正在分析招标文档结构，生成投标大纲...\n\n（此功能将在集成 bidWriterService 后实现）';
-      } else if (workflowState.currentStep === 'writing' && currentSection) {
-        responseText = `正在为"${currentSection.title}"生成内容...\n\n提示：您可以在右侧编辑器中直接编写，或使用 AI 续写功能。\n\n（此功能将在集成 bidWriterService 后实现）`;
-      } else {
-        responseText = '我明白了。请继续告诉我您的需求，或直接在编辑器中开始编写。\n\n（AI 集成即将完成）';
+      // Build contextual prompt based on workflow step
+      let contextPrefix = '';
+      if (workflowState.currentStep === 'writing' && currentSection) {
+        contextPrefix = `[当前正在编写投标文件章节: "${currentSection.title}"]\n`;
+        if (currentSection.content) {
+          const preview = currentSection.content.slice(0, 500);
+          contextPrefix += `[已编写内容预览: ${preview}${currentSection.content.length > 500 ? '...' : ''}]\n`;
+        }
+        contextPrefix += '\n';
       }
 
-      // Simulate delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const fullPrompt = contextPrefix + currentInput;
+
+      // Build chat history (exclude init message)
+      const chatHistory: ChatMessage[] = messages
+        .filter(m => m.id !== '1')
+        .map(m => ({
+          role: m.role === 'ai' ? 'assistant' as const : 'user' as const,
+          content: m.content,
+        }));
+
+      const response = await chatWithDocument(fullPrompt, tenderDocumentTree, chatHistory, tenderDocumentId);
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
-        content: responseText,
-        timestamp: Date.now()
+        content: response.answer,
+        timestamp: Date.now(),
+        sources: response.sources,
       };
       setMessages(prev => [...prev, aiMsg]);
     } catch (e) {
+      console.error('BidChatPanel send error:', e);
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'ai',
@@ -112,9 +125,9 @@ const BidChatPanel: React.FC<BidChatPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [input, loading, messages, workflowState, currentSection, tenderDocumentTree, tenderDocumentId]);
 
-  const getProviderLabel = (provider: string, model: string): string => {
+  const getProviderLabel = (provider: string, model?: string): string => {
     // Use actual model name for display
     if (model && model !== 'unknown') {
       // Format model name for display (e.g., "deepseek-chat" -> "DeepSeek Chat")

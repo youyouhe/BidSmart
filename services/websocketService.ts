@@ -25,7 +25,8 @@ export interface StatusUpdateMessage {
   metadata?: {
     duration_ms?: number;
     is_reparse?: boolean;
-    [key: string]: any;
+    outline?: Record<string, unknown>[];
+    [key: string]: unknown;
   };
 }
 
@@ -50,7 +51,7 @@ export interface AuditProgressMessage {
   message: string;
   progress: number;
   metadata?: {
-    [key: string]: any;
+    [key: string]: string | number | boolean | undefined;
   };
 }
 
@@ -58,9 +59,7 @@ export type WebSocketMessage =
   | StatusUpdateMessage
   | ConnectedMessage
   | SubscribedMessage
-  | AuditProgressMessage
-  | 'ping'
-  | 'pong';
+  | AuditProgressMessage;
 
 export interface WebSocketCallbacks {
   onStatus?: (update: StatusUpdateMessage) => void;
@@ -200,7 +199,7 @@ export class DocumentWebSocket {
 
     // Handle JSON messages
     try {
-      const message = JSON.parse(data) as WebSocketMessage;
+      const message: WebSocketMessage = JSON.parse(data);
 
       switch (message.type) {
         case 'connected':
@@ -232,7 +231,7 @@ export class DocumentWebSocket {
         case 'audit_progress':
           console.log(`[WebSocket] Audit progress: Phase ${message.phase_number}/${message.total_phases} - ${message.message}`);
           this.callbacks.onAuditProgress?.(message);
-          
+
           // Also call generic onProgress if available
           if (message.progress !== undefined) {
             this.callbacks.onProgress?.(message.progress);

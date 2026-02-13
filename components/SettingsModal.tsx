@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Server, Key, Save, Eye, EyeOff } from 'lucide-react';
+import { X, Server, Key, Save, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export interface ApiSettings {
   endpoint: string;
@@ -35,6 +35,15 @@ export const saveSettings = (settings: ApiSettings): void => {
   }
 };
 
+const isValidEndpointUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -47,6 +56,7 @@ export default function SettingsModal({ isOpen, onClose, onSave, currentSettings
   const [token, setToken] = useState(currentSettings.token);
   const [showToken, setShowToken] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('SettingsModal isOpen changed:', isOpen);
@@ -55,9 +65,15 @@ export default function SettingsModal({ isOpen, onClose, onSave, currentSettings
   }, [currentSettings, isOpen]);
 
   const handleSave = async () => {
+    const trimmedEndpoint = endpoint.trim();
+    if (trimmedEndpoint && !isValidEndpointUrl(trimmedEndpoint)) {
+      setValidationError('请输入有效的 URL（以 http:// 或 https:// 开头）');
+      return;
+    }
+    setValidationError(null);
     setIsSaving(true);
     const newSettings: ApiSettings = {
-      endpoint: endpoint.trim(),
+      endpoint: trimmedEndpoint,
       token: token.trim()
     };
 
@@ -99,13 +115,22 @@ export default function SettingsModal({ isOpen, onClose, onSave, currentSettings
             <input
               type="text"
               value={endpoint}
-              onChange={(e) => setEndpoint(e.target.value)}
+              onChange={(e) => {
+                setEndpoint(e.target.value);
+                setValidationError(null);
+              }}
               placeholder="http://localhost:8003"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm"
+              className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm ${
+                validationError ? 'border-red-400' : 'border-gray-300'
+              }`}
             />
-            <p className="mt-1.5 text-xs text-gray-500">
-              API 服务器地址，例如: http://192.168.8.107:8003
-            </p>
+            {validationError ? (
+              <p className="mt-1.5 text-xs text-red-600">{validationError}</p>
+            ) : (
+              <p className="mt-1.5 text-xs text-gray-500">
+                API 服务器地址，例如: http://192.168.8.107:8003
+              </p>
+            )}
           </div>
 
           {/* Token Setting */}
@@ -133,6 +158,14 @@ export default function SettingsModal({ isOpen, onClose, onSave, currentSettings
             </div>
             <p className="mt-1.5 text-xs text-gray-500">
               API 认证令牌，如后端无需验证可留空
+            </p>
+          </div>
+
+          {/* Security Notice */}
+          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+            <p className="text-xs text-amber-700">
+              Token 存储在浏览器 localStorage 中，同域下的脚本均可访问。请勿在公共设备上保存敏感 Token。
             </p>
           </div>
         </div>

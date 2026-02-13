@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { FileText, Sparkles, ChevronRight, Check, Loader2 } from 'lucide-react';
 import { Node, TenderOutline, AIConfig } from '../types';
-import { generateOutline } from '../services/bidWriterService';
+import { generateOutlineViaAgents } from '../services/bidWriterService';
+import {
+  subscribeToDocumentStatus,
+  unsubscribeFromDocumentStatus,
+  type AuditProgressMessage,
+  type StatusUpdateMessage,
+} from '../services/websocketService';
 import { clsx } from 'clsx';
 import AttachmentUploader, { AttachmentFile } from './AttachmentUploader';
 
@@ -21,6 +28,12 @@ interface SectionInput {
   order: number;
 }
 
+// Phase definitions for the two-step agent pipeline
+const PHASES = [
+  { key: 'format_extraction', label: '分析格式要求' },
+  { key: 'outline_planning', label: '生成投标大纲' },
+] as const;
+
 const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
   tenderDocumentTree,
   tenderDocumentId,
@@ -36,48 +49,119 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
 
+  // Agent progress state
+  const [currentPhase, setCurrentPhase] = useState<string>('');
+  const [progressMessage, setProgressMessage] = useState('');
+  const projectIdRef = useRef<string | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (projectIdRef.current) {
+        unsubscribeFromDocumentStatus(projectIdRef.current);
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     setStep('generating');
+    setCurrentPhase('');
+    setProgressMessage('正在启动AI代理...');
 
     try {
-      // Build attachment context
-      const attachmentContext = attachments.length > 0
-        ? `\n\n参考附件: ${attachments.map(a => a.name).join(', ')}`
-        : '';
-
-      const outline = await generateOutline(
+      // 1. Call backend to start agent pipeline
+      const { projectId } = await generateOutlineViaAgents(
         tenderDocumentTree,
-        userRequirements + attachmentContext,
-        aiConfig,
-        attachments.map(a => a.name), // Pass attachment names
-        tenderDocumentId // Pass document ID for PDF page loading
+        tenderDocumentId || '',
+        tenderDocumentTree.title || '新投标项目',
+        userRequirements || undefined,
+        attachments.length > 0 ? attachments.map(a => a.name) : undefined,
       );
-      setGeneratedOutline(outline);
 
-      // Convert to editable format
-      const editableSections: SectionInput[] = outline.sections.map(section => ({
-        id: section.id,
-        title: section.title,
-        description: section.description,
-        requirementSummary: section.requirementSummary,
-        order: section.order
-      }));
+      projectIdRef.current = projectId;
 
-      setSections(editableSections);
+      // 2. Subscribe to WebSocket for progress & completion
+      subscribeToDocumentStatus(projectId, {
+        onAuditProgress: (update: AuditProgressMessage) => {
+          setCurrentPhase(update.phase);
+          setProgressMessage(update.message);
+        },
+        onStatus: (update: StatusUpdateMessage) => {
+          if (update.status === 'completed') {
+            handlePipelineCompleted(projectId, update);
+          } else if (update.status === 'failed') {
+            handlePipelineFailed(update.error_message || '未知错误');
+          }
+        },
+        onError: (error: Error) => {
+          console.error('WebSocket error:', error);
+        },
+      });
 
-      // Expand all sections initially
-      const allIds = new Set(editableSections.map(s => s.id));
-      setExpandedSections(allIds);
+      // 3. Safety timeout (180s)
+      timeoutRef.current = setTimeout(() => {
+        if (step === 'generating') {
+          handlePipelineFailed('大纲生成超时，请重试');
+        }
+      }, 180_000);
 
-      setStep('review');
     } catch (error) {
-      console.error('Failed to generate outline:', error);
-      alert('大纲生成失败，请重试');
+      console.error('Failed to start outline generation:', error);
+      toast.error('启动大纲生成失败，请重试');
       setStep('input');
-    } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handlePipelineCompleted = (projectId: string, update: StatusUpdateMessage) => {
+    // Cleanup
+    unsubscribeFromDocumentStatus(projectId);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    const outlineSections = (update.metadata?.outline as Record<string, unknown>[]) || [];
+
+    // Build TenderOutline from backend sections
+    const mappedSections = outlineSections.map((s, i) => ({
+      id: (s.id as string) || `sec-${i + 1}`,
+      title: (s.title as string) || '',
+      description: (s.summary as string) || '',
+      requirementSummary: '',
+      order: (s.order as number) || i + 1,
+    }));
+
+    const outline: TenderOutline = {
+      projectId,
+      sections: mappedSections,
+      generatedAt: Date.now(),
+      attachments: attachments.map(a => ({
+        id: a.id,
+        name: a.name,
+        size: a.size,
+        type: a.type,
+      })),
+    };
+
+    setGeneratedOutline(outline);
+    setSections(mappedSections);
+    setExpandedSections(new Set(mappedSections.map(s => s.id)));
+    setStep('review');
+    setIsGenerating(false);
+  };
+
+  const handlePipelineFailed = (errorMessage: string) => {
+    if (projectIdRef.current) {
+      unsubscribeFromDocumentStatus(projectIdRef.current);
+    }
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    toast.error(`大纲生成失败: ${errorMessage}`);
+    setStep('input');
+    setIsGenerating(false);
   };
 
   const handleSectionChange = (id: string, field: keyof SectionInput, value: string) => {
@@ -149,7 +233,7 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
   // Step 1: Input requirements
   if (step === 'input') {
     return (
-      <div className="flex flex-col h-full bg-gray-100">
+      <div className="flex flex-col h-screen bg-gray-100">
         {/* Header */}
         <div className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
@@ -176,12 +260,12 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-8">
               <h2 className="text-blue-800 font-semibold mb-2 flex items-center gap-2">
                 <Sparkles size={18} />
-                AI 将根据以下信息生成大纲
+                AI 多代理协作生成大纲
               </h2>
               <ul className="text-sm text-blue-700 space-y-1">
-                <li>• 招标文档的章节结构和要求</li>
-                <li>• 您补充的特殊要求</li>
-                <li>• 投标文件的标准格式</li>
+                <li>1. 格式分析代理：从招标文档中提取格式要求和编排规范</li>
+                <li>2. 大纲规划代理：根据格式要求和招标内容生成完整大纲</li>
+                <li>3. 您可以在生成后手动调整大纲结构</li>
               </ul>
             </div>
 
@@ -191,7 +275,7 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
               <div className="flex items-start gap-3">
                 <FileText className="text-gray-400 shrink-0 mt-1" size={18} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-gray-900 font-medium truncate">{tenderDocumentTree.display_title || tenderDocumentTree.title}</p>
+                  <p className="text-gray-900 font-medium truncate">{tenderDocumentTree.title}</p>
                   <p className="text-sm text-gray-500 mt-1">
                     {tenderDocumentTree.children.length} 个章节
                   </p>
@@ -239,7 +323,7 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
             {/* Tips */}
             <div className="mt-6 p-4 bg-gray-50 rounded-lg">
               <p className="text-xs text-gray-500">
-                💡 <strong>提示：</strong>您可以在生成后手动调整大纲结构
+                <strong>提示：</strong>AI 使用多个专业代理协作分析招标文档，生成更精准的大纲
               </p>
             </div>
           </div>
@@ -269,14 +353,55 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
     );
   }
 
-  // Step 2: Generating
+  // Step 2: Generating (two-phase progress)
   if (step === 'generating') {
     return (
-      <div className="flex flex-col h-full bg-gray-100 items-center justify-center">
-        <div className="text-center">
+      <div className="flex flex-col h-screen bg-gray-100 items-center justify-center">
+        <div className="text-center max-w-md mx-auto">
           <Loader2 size={48} className="animate-spin text-purple-600 mx-auto mb-6" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">正在生成大纲...</h2>
-          <p className="text-gray-500">AI 正在分析招标文档，这可能需要几秒钟</p>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">AI 正在生成大纲</h2>
+
+          {/* Phase progress indicators */}
+          <div className="space-y-3 mb-6">
+            {PHASES.map((phase, index) => {
+              const isActive = currentPhase === phase.key;
+              const isCompleted =
+                currentPhase !== '' &&
+                PHASES.findIndex(p => p.key === currentPhase) > index;
+
+              return (
+                <div
+                  key={phase.key}
+                  className={clsx(
+                    'flex items-center gap-3 px-4 py-3 rounded-lg transition-all',
+                    isActive && 'bg-purple-50 border border-purple-200',
+                    isCompleted && 'bg-green-50 border border-green-200',
+                    !isActive && !isCompleted && 'bg-gray-50 border border-gray-200'
+                  )}
+                >
+                  {isCompleted ? (
+                    <Check size={18} className="text-green-600 shrink-0" />
+                  ) : isActive ? (
+                    <Loader2 size={18} className="animate-spin text-purple-600 shrink-0" />
+                  ) : (
+                    <div className="w-[18px] h-[18px] rounded-full border-2 border-gray-300 shrink-0" />
+                  )}
+                  <span
+                    className={clsx(
+                      'text-sm font-medium',
+                      isActive && 'text-purple-800',
+                      isCompleted && 'text-green-800',
+                      !isActive && !isCompleted && 'text-gray-500'
+                    )}
+                  >
+                    {phase.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-sm text-gray-500">{progressMessage}</p>
         </div>
       </div>
     );
@@ -284,7 +409,7 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
 
   // Step 3: Review and edit
   return (
-    <div className="flex flex-col h-full bg-gray-100">
+    <div className="flex flex-col h-screen bg-gray-100">
       {/* Header */}
       <div className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0">
         <div className="flex items-center gap-3">
@@ -320,7 +445,7 @@ const OutlineGenerator: React.FC<OutlineGeneratorProps> = ({
           {/* Summary */}
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
             <p className="text-sm text-green-800">
-              ✅ 大纲已生成，包含 {sections.length} 个章节。您可以编辑标题、描述或添加/删除章节。
+              大纲已生成，包含 {sections.length} 个章节。您可以编辑标题、描述或添加/删除章节。
             </p>
           </div>
 

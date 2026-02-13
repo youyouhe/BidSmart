@@ -2,6 +2,109 @@ body {
   font-family: 'Inter', sans-serif;
 }
 
+/* Bid Editor Markdown Preview Styles */
+.bid-markdown-preview h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  margin: 0.8em 0 0.4em;
+  line-height: 1.3;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 0.3em;
+}
+.bid-markdown-preview h2 {
+  font-size: 1.4em;
+  font-weight: 700;
+  margin: 0.7em 0 0.35em;
+  line-height: 1.3;
+}
+.bid-markdown-preview h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+  line-height: 1.4;
+}
+.bid-markdown-preview h4 {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 0.5em 0 0.25em;
+  line-height: 1.4;
+}
+.bid-markdown-preview p {
+  margin: 0.5em 0;
+  text-indent: 2em;
+}
+.bid-markdown-preview strong {
+  font-weight: 700;
+}
+.bid-markdown-preview em {
+  font-style: italic;
+}
+.bid-markdown-preview ul, .bid-markdown-preview ol {
+  margin: 0.4em 0;
+  padding-left: 2em;
+}
+.bid-markdown-preview li {
+  margin: 0.2em 0;
+}
+.bid-markdown-preview ol {
+  list-style-type: decimal;
+}
+.bid-markdown-preview ul {
+  list-style-type: disc;
+}
+.bid-markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+  font-size: 0.9em;
+}
+.bid-markdown-preview th, .bid-markdown-preview td {
+  border: 1px solid #d1d5db;
+  padding: 0.5em 0.75em;
+  text-align: left;
+  text-indent: 0;
+}
+.bid-markdown-preview th {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+.bid-markdown-preview blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: #6b7280;
+}
+.bid-markdown-preview code {
+  background: #f3f4f6;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.bid-markdown-preview pre {
+  background: #f3f4f6;
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.bid-markdown-preview pre code {
+  background: none;
+  padding: 0;
+}
+.bid-markdown-preview hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1em 0;
+}
+/* Reset styles inside Mermaid SVG foreignObject to prevent CSS leaking */
+.bid-markdown-preview svg foreignObject * {
+  text-indent: 0;
+  margin: 0;
+  padding: 0;
+  line-height: normal;
+  font-size: initial;
+}
+
 /* Custom scrollbar for webkit */
 ::-webkit-scrollbar {
   width: 8px;

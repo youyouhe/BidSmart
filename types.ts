@@ -1,14 +1,10 @@
 export interface Node {
   id: string;
   title: string;
-  content: string;
-  level: number;
   children: Node[];
-  summary?: string; // Optional summary from remote API
-  display_title?: string; // Cleaned title with id prepended for UI display (e.g., "1 项目概况")
-  is_noise?: boolean; // Whether this is an invalid entry (headers, footers, metadata)
-  page_start?: number; // PDF: starting page number (1-based)
-  page_end?: number; // PDF: ending page number (1-based)
+  summary?: string; // LLM-generated section summary
+  ps?: number; // PDF: starting page number (1-based)
+  pe?: number; // PDF: ending page number (1-based)
   line_start?: number; // Markdown: starting line number
 }
 
@@ -37,6 +33,12 @@ export interface RemoteParseResponse {
   };
 }
 
+export interface ChatToolCall {
+  name: string;
+  status: string;
+  result?: any;
+}
+
 export interface RemoteChatResponse {
   answer: string;
   sources: SourceInfo[];
@@ -45,6 +47,7 @@ export interface RemoteChatResponse {
   model: string;
   system_prompt?: string; // System prompt used for generating the response
   raw_output?: string; // Raw LLM output (truncated to 500 chars)
+  tool_call?: ChatToolCall; // Tool call result if triggered
 }
 
 export interface HealthCheckResponse {
@@ -90,6 +93,7 @@ export interface ChatResponse {
   model?: string; // Remote API only
   system_prompt?: string; // System prompt used for generating the response
   raw_output?: string; // Raw LLM output (truncated to 500 chars)
+  tool_call?: ChatToolCall; // Tool call result if triggered
 }
 
 export interface Message {
@@ -138,7 +142,7 @@ export interface Document {
     progress?: number;
     stage?: string;
     message?: string;
-    [key: string]: any;
+    [key: string]: string | number | boolean | undefined;
   };
   category?: string | null; // Document category
   tags?: string[]; // Document tags
@@ -273,3 +277,241 @@ export interface AIConfig {
 
 // Writing language
 export type WritingLanguage = 'zh' | 'en' | 'ja' | 'ko';
+
+// ====================
+// Timeline Types
+// ====================
+
+export type TimelineStatus = 'active' | 'expiring_soon' | 'expired' | 'future';
+
+// Full bidding lifecycle milestone types
+export type MilestoneType =
+  | 'publish'         // 公告发布
+  | 'doc_deadline'    // 文件获取截止
+  | 'qa_deadline'     // 答疑截止
+  | 'bid_deadline'    // 投标截止
+  | 'opening'         // 开标
+  | 'evaluation'      // 评标
+  | 'award_notice'    // 中标公示
+  | 'contract_sign'   // 合同签订
+  | 'delivery'        // 交货
+  | 'acceptance'      // 验收
+  | 'warranty_start'  // 质保开始
+  | 'warranty_end'    // 质保结束
+  | 'payment'         // 付款
+  | 'custom'          // 自定义
+  // Legacy aliases (backward compatible)
+  | 'deadline'        // → bid_deadline
+  | 'contract_start'  // → contract_sign
+  | 'contract_end';   // → warranty_end
+
+export interface TimelineMilestone {
+  name: string;
+  date: string; // YYYY-MM-DD
+  type: MilestoneType;
+}
+
+export interface TimelineEntry {
+  id: string;
+  document_id: string;
+  project_name: string;
+  start_date: string | null;
+  end_date: string | null;
+  milestones: TimelineMilestone[];
+  budget: number | null;
+  budget_unit: string;
+  notes: string | null;
+  status: TimelineStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimelineListResponse {
+  items: TimelineEntry[];
+  count: number;
+  expiring_count: number;
+  expired_count: number;
+}
+
+// ====================
+// Company Data Types (for bid agent system)
+// ====================
+
+export interface CompanyBankInfo {
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+}
+
+export interface CompanyProfile {
+  company_name: string;
+  legal_representative: string;
+  registration_number: string;
+  address: string;
+  phone: string;
+  fax: string;
+  email: string;
+  website: string;
+  established_date: string;
+  registered_capital: string;
+  qualifications: string[];
+  bank_info: CompanyBankInfo;
+  business_scope: string;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+  title: string;
+  certifications: string[];
+  years_experience: number;
+  education: string;
+  key_projects: string[];
+  description: string;
+}
+
+export interface PastProject {
+  id: string;
+  project_name: string;
+  client: string;
+  contract_value: number;
+  currency: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+  domain: string;
+  description: string;
+  technologies: string[];
+  team_size: number;
+}
+
+export interface CapabilityDomain {
+  description: string;
+  areas: string[];
+}
+
+export interface CompanyCapabilities {
+  [domain: string]: CapabilityDomain;
+}
+
+export interface CompanyData {
+  profile: CompanyProfile;
+  team: TeamMember[];
+  pastProjects: PastProject[];
+  capabilities: CompanyCapabilities;
+}
+
+// ====================
+// Multi-Document Analysis Types
+// ====================
+
+export interface DocumentTab {
+  documentId: string;
+  filename: string;
+  tree: Node;              // original tree from backend
+  namespacedTree: Node;    // tree with prefixed node IDs
+}
+
+export interface NodeDocumentMapping {
+  [namespacedNodeId: string]: {
+    documentId: string;
+    originalNodeId: string;
+  };
+}
+
+// ====================
+// DocumentSet Types
+// ====================
+
+export type DocumentSetItemType = 'tender' | 'reference' | 'template' | 'historical' | 'company';
+export type DocumentSetItemRole = 'primary' | 'auxiliary' | 'reference';
+
+export interface DocumentSetItem {
+  documentId: string;
+  name: string;
+  isPrimary?: boolean;
+  addedAt?: string;
+  docType?: DocumentSetItemType;
+  role?: DocumentSetItemRole;
+  order?: number;
+  metadata?: {
+    pages?: number;
+    filename?: string;
+    [key: string]: any;
+  };
+  tree?: Node;
+}
+
+export interface DocumentSet {
+  id: string;
+  name: string;
+  description: string;
+  items: DocumentSetItem[];
+  createdAt: number;
+  updatedAt: number;
+  projectId?: string;
+}
+
+// For creating a new document set
+export interface CreateDocumentSetRequest {
+  name: string;
+  description?: string;
+  primaryDocId: string;
+  auxiliaryDocs?: Array<{
+    docId: string;
+    name: string;
+    docType: DocumentSetItemType;
+  }>;
+}
+
+// API Response types
+export interface DocumentSetResponse {
+  id: string;
+  name: string;
+  description: string;
+  items: DocumentSetItem[];
+  createdAt: number;
+  updatedAt: number;
+  projectId?: string;
+}
+
+export interface DocumentSetListResponse {
+  items: DocumentSet[];
+  count: number;
+}
+
+// Document set query request
+export interface DocumentSetQueryRequest {
+  query: string;
+  scope?: 'all' | 'primary' | 'auxiliary' | string; // string = specific docId
+  nodeIds?: string[];
+}
+
+export interface DocumentSetQueryResponse {
+  results: Array<{
+    documentId: string;
+    documentName: string;
+    answer: string;
+    sources?: SourceInfo[];
+  }>;
+}
+
+// Merged tree view
+export interface MergedTreeResponse {
+  tree: Node[];
+  nodeDocumentMap: NodeDocumentMapping;
+}
+
+// Document comparison
+export interface DocumentComparisonRequest {
+  docId1: string;
+  docId2: string;
+  sectionPattern?: string;
+}
+
+export interface DocumentComparisonResponse {
+  commonSections: string[];
+  onlyInDoc1: string[];
+  onlyInDoc2: string[];
+}

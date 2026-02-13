@@ -129,14 +129,13 @@ const TreeView: React.FC<TreeViewProps> = ({
   const [editingTitle, setEditingTitle] = useState('');
   const hasChildren = node.children && node.children.length > 0;
 
-  // Helper to get the display title (prefer display_title, fallback to title)
+  // Helper to get the display title
   const getDisplayTitle = () => {
     // In edit mode, use edited title or original title
     if (editedTitles[node.id]) {
       return editedTitles[node.id];
     }
-    // Prefer display_title for display, fallback to title
-    return node.display_title || node.title;
+    return node.title;
   };
 
   // Helper to get the original title for editing
@@ -443,15 +442,15 @@ const TreeView: React.FC<TreeViewProps> = ({
         )}
         
         {/* Show page range for PDF nodes */}
-        {node.page_start !== undefined && node.page_end !== undefined && (
+        {node.ps !== undefined && node.pe !== undefined && (
           <span className="text-xs text-gray-400 ml-2 shrink-0">
             {hasSuggestion && primarySuggestion.action === 'MODIFY_PAGE' && primarySuggestion.suggested_title ? (
               <>
-                <span className="line-through opacity-60">p.{node.page_start}-{node.page_end}</span>
+                <span className="line-through opacity-60">p.{node.ps}-{node.pe}</span>
                 <span className="ml-1 font-medium">p.{primarySuggestion.suggested_title}</span>
               </>
             ) : (
-              `p.${node.page_start}-${node.page_end}`
+              `p.${node.ps}-${node.pe}`
             )}
           </span>
         )}

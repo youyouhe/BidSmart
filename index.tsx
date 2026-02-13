@@ -1,4 +1,5 @@
 import ReactDOM from 'react-dom/client';
+import { Toaster } from 'react-hot-toast';
 import App from './App';
 import { LanguageProvider } from './contexts/LanguageContext';
 import './index.css';
@@ -12,5 +13,6 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <LanguageProvider>
     <App />
+    <Toaster position="top-center" toastOptions={{ duration: 3000 }} />
   </LanguageProvider>
 );

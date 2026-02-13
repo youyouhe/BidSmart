@@ -27,9 +27,9 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
     console.log('[DocChatPanel] Rendered with:', {
       hasOnClearHistory: !!onClearHistory,
       messagesCount: messages.length,
-      documentTitle: documentTree.display_title || documentTree.title
+      documentTitle: documentTree.title
     });
-  }, [onClearHistory, messages.length, documentTree.display_title, documentTree.title]);
+  }, [onClearHistory, messages.length, documentTree.title]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -168,7 +168,7 @@ const DocChatPanel: React.FC<DocChatPanelProps> = ({
         </div>
         <div className="mt-2">
           <p className="text-[10px] text-gray-400 text-center">
-            基于 {documentTree.display_title || documentTree.title} 的智能问答
+            基于 {documentTree.title} 的智能问答
           </p>
         </div>
       </div>

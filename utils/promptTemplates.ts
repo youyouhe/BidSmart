@@ -157,9 +157,6 @@ function getRelevantRequirements(tree: Node, nodeIds: string[]): string {
   function searchNode(node: Node): void {
     if (nodeIds.includes(node.id)) {
       let req = `【${node.title}】`;
-      if (node.content) {
-        req += `\n${node.content.slice(0, 200)}${node.content.length > 200 ? '...' : ''}`;
-      }
       if (node.summary) {
         req += `\n摘要: ${node.summary}`;
       }
