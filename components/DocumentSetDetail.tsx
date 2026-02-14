@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
   X,
@@ -21,6 +21,7 @@ import { useDocumentSet } from '../hooks/useDocumentSet';
 import { listDocuments, transformToGalleryItems } from '../services/apiService';
 import { GalleryItem } from '../types';
 import TreeView from './TreeView';
+import DocumentViewer from './DocumentViewer';
 import DocumentSetQueryPanel from './DocumentSetQueryPanel';
 import { clsx } from 'clsx';
 
@@ -56,6 +57,12 @@ const DocumentSetDetail: React.FC<DocumentSetDetailProps> = ({
   const [activeTab, setActiveTab] = useState<'docs' | 'tree' | 'query'>('docs');
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null);
+
+  // Tree tab PDF viewer state
+  const [treeSelectedDocId, setTreeSelectedDocId] = useState<string | null>(null);
+  const [treeTargetPage, setTreeTargetPage] = useState<number | null>(null);
+  const [treeActiveNodeId, setTreeActiveNodeId] = useState<string | null>(null);
+  const [treeSelectedDocName, setTreeSelectedDocName] = useState<string>('');
 
   useEffect(() => {
     if (setId) {
@@ -160,6 +167,43 @@ const DocumentSetDetail: React.FC<DocumentSetDetailProps> = ({
     };
     return colors[type] || 'bg-gray-100 text-gray-700';
   };
+
+  // Handle tree node click: parse documentId from merged tree node ID and navigate PDF
+  const handleTreeNodeClick = useCallback((nodeId: string) => {
+    if (nodeId === 'merged-root') return;
+
+    // Find the clicked node in the merged tree
+    const findNode = (node: Node, id: string): Node | null => {
+      if (node.id === id) return node;
+      if (node.children) {
+        for (const child of node.children) {
+          const found = findNode(child, id);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const clickedNode = mergedTree ? findNode(mergedTree, nodeId) : null;
+    if (!clickedNode) return;
+
+    // Parse documentId from node ID (format: "{documentId}:{originalNodeId}")
+    const colonIndex = nodeId.indexOf(':');
+    if (colonIndex === -1) return;
+
+    const docId = nodeId.substring(0, colonIndex);
+    setTreeActiveNodeId(nodeId);
+
+    // Find document name from current set
+    const docItem = currentSet?.items.find(item => item.documentId === docId);
+    setTreeSelectedDocName(docItem?.name || '文档');
+
+    // Set document and target page
+    setTreeSelectedDocId(docId);
+    if (clickedNode.ps !== undefined && clickedNode.ps > 0) {
+      setTreeTargetPage(clickedNode.ps);
+    }
+  }, [mergedTree, currentSet]);
 
   const filteredDocs = availableDocs.filter(
     (doc) =>
@@ -449,17 +493,79 @@ const DocumentSetDetail: React.FC<DocumentSetDetailProps> = ({
         )}
 
         {activeTab === 'tree' && (
-          <div className="h-full p-6 overflow-auto">
-            {mergedTree ? (
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <TreeView node={mergedTree} />
+          <div className="flex h-full">
+            {/* Left: Merged Tree */}
+            <div className="w-[360px] shrink-0 bg-white border-r border-gray-200 flex flex-col">
+              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                  <FolderTree size={16} className="text-blue-500" />
+                  合并目录树
+                </h3>
+                {currentSet && (
+                  <span className="text-xs text-gray-400">
+                    {currentSet.items.length} 个文档
+                  </span>
+                )}
               </div>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-400">
-                <RefreshCw size={24} className="animate-spin mr-3" />
-                <span>加载合并目录树...</span>
+              <div className="flex-1 overflow-y-auto py-2">
+                {mergedTree ? (
+                  <TreeView
+                    node={mergedTree}
+                    onNodeClick={handleTreeNodeClick}
+                    activeNodeIds={treeActiveNodeId ? [treeActiveNodeId] : []}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-400">
+                    <RefreshCw size={24} className="animate-spin mr-3" />
+                    <span>加载目录树...</span>
+                  </div>
+                )}
               </div>
-            )}
+              {/* Document legend */}
+              {currentSet && currentSet.items.length > 0 && (
+                <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
+                  <div className="text-xs text-gray-500 mb-2">文档来源</div>
+                  <div className="space-y-1">
+                    {currentSet.items.map(item => (
+                      <div key={item.documentId} className="flex items-center text-xs">
+                        <span
+                          className={clsx(
+                            'w-2 h-2 rounded-full mr-2 shrink-0',
+                            item.isPrimary ? 'bg-amber-400' : 'bg-blue-400'
+                          )}
+                        />
+                        <span className="truncate text-gray-600">{item.name}</span>
+                        {item.isPrimary && (
+                          <span className="ml-1 text-amber-600 shrink-0">(主)</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right: PDF Viewer */}
+            <div className="flex-1 min-w-0">
+              {treeSelectedDocId ? (
+                <DocumentViewer
+                  documentTree={{
+                    id: 'doc-root',
+                    title: treeSelectedDocName,
+                    children: [],
+                    summary: '',
+                  }}
+                  documentId={treeSelectedDocId}
+                  targetPage={treeTargetPage}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full bg-gray-100 text-gray-400">
+                  <FileText size={48} className="mb-4 opacity-30" />
+                  <p className="text-lg font-medium text-gray-500">点击左侧目录节点</p>
+                  <p className="text-sm text-gray-400 mt-1">查看对应的 PDF 页面内容</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

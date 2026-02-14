@@ -12,6 +12,7 @@ interface DocumentViewerProps {
   documentId: string | null;
   highlightedNodeId?: string | null;
   activeNodeIds?: string[];
+  targetPage?: number | null;
 }
 
 interface RenderedPage {
@@ -26,7 +27,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   documentTree,
   documentId,
   highlightedNodeId,
-  activeNodeIds = []
+  activeNodeIds = [],
+  targetPage,
 }) => {
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [renderedPages, setRenderedPages] = useState<Map<number, RenderedPage>>(new Map());
@@ -171,6 +173,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       }
     }
   }, [highlightedNodeId, pdfDoc, documentTree, findNodeById]);
+
+  // Scroll to target page directly
+  useEffect(() => {
+    if (targetPage && targetPage > 0 && pdfDoc) {
+      const pageNum = Math.min(targetPage, totalPages);
+      setTimeout(() => {
+        const pageElement = pageRefs.current.get(pageNum);
+        pageElement?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+  }, [targetPage, pdfDoc, totalPages]);
 
   // Zoom handlers
   const handleZoomIn = () => setScale(prev => Math.min(prev + 0.25, 3));
