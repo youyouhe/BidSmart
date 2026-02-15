@@ -1,15 +1,28 @@
 """FastAPI backend for bid document retrieval."""
 import json
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent
 INDEX_PATH = BASE_DIR / "index.json"
 PAGES_DIR = BASE_DIR / "pages"
+DATA_DIR = BASE_DIR / "data"
+MANIFEST_PATH = DATA_DIR / "manifest.json"
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
+
+CATEGORY_MAP = {
+    "company": "基本文件",
+    "qualification": "资质证明",
+    "personnel": "人员资料",
+    "performance": "业绩证明",
+}
 
 app = FastAPI(title="投标文件检索系统", version="1.0.0")
 
@@ -26,9 +39,43 @@ documents: list[dict] = []
 @app.on_event("startup")
 def load_index():
     global documents
-    with open(INDEX_PATH, encoding="utf-8") as f:
-        data = json.load(f)
-    documents = data["documents"]
+    docs: list[dict] = []
+
+    # Load pages/index.json
+    if INDEX_PATH.is_file():
+        with open(INDEX_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        for doc in data["documents"]:
+            doc["_source"] = "pages"
+            docs.append(doc)
+
+    # Load data/manifest.json
+    if MANIFEST_PATH.is_file():
+        with open(MANIFEST_PATH, encoding="utf-8") as f:
+            manifest = json.load(f)
+        for entry in manifest.get("results", []):
+            image_files = [
+                f for f in entry.get("files", [])
+                if Path(f).suffix.lower() in _IMAGE_EXTS
+            ]
+            if not image_files:
+                continue
+            title = entry.get("title", "")
+            number = entry.get("number", "")
+            doc = {
+                "id": f"data_{number}_{title}".replace(" ", "_"),
+                "section": number,
+                "type": title,
+                "category": CATEGORY_MAP.get(entry.get("category", ""), entry.get("category", "")),
+                "label": f"{number} {title}",
+                "files": image_files,
+                "page_range": [],
+                "searchable_tags": [title],
+                "_source": "data",
+            }
+            docs.append(doc)
+
+    documents = docs
 
 
 def _match_keyword(doc: dict, keyword: str) -> bool:
@@ -38,8 +85,15 @@ def _match_keyword(doc: dict, keyword: str) -> bool:
     return any(keyword in f.lower() for f in fields)
 
 
+def _get_source_dir(doc: dict) -> Path:
+    """Return the filesystem directory where a document's files live."""
+    return DATA_DIR if doc.get("_source") == "data" else PAGES_DIR
+
+
 def _format_result(doc: dict) -> dict:
     files = doc.get("files", [])
+    source = doc.get("_source", "pages")
+    url_prefix = f"/{source}"
     return {
         "id": doc["id"],
         "section": doc.get("section", ""),
@@ -47,7 +101,8 @@ def _format_result(doc: dict) -> dict:
         "category": doc["category"],
         "label": doc["label"],
         "page_range": doc.get("page_range", []),
-        "images": [{"filename": f, "url": f"/pages/{f}"} for f in files],
+        "source": source,
+        "images": [{"filename": f, "url": f"{url_prefix}/{f}"} for f in files],
     }
 
 
@@ -84,4 +139,75 @@ def get_document(doc_id: str):
     raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
 
 
+class ReplaceRequest(BaseModel):
+    target_file: str
+    placeholder: str
+    doc_id: str | None = None
+    query: str | None = None
+
+
+@app.post("/api/replace")
+def replace_placeholder(req: ReplaceRequest):
+    # 1. Resolve document: doc_id takes priority, then query
+    doc = None
+    if req.doc_id:
+        for d in documents:
+            if d["id"] == req.doc_id:
+                doc = d
+                break
+        if doc is None:
+            raise HTTPException(status_code=404, detail=f"Document '{req.doc_id}' not found")
+    elif req.query:
+        matches = [d for d in documents if _match_keyword(d, req.query)]
+        if not matches:
+            raise HTTPException(status_code=404, detail=f"No document matching '{req.query}'")
+        doc = matches[0]
+    else:
+        raise HTTPException(status_code=400, detail="Must provide doc_id or query")
+
+    # 2. Read target file and verify placeholder exists
+    target = Path(req.target_file)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail=f"Target file not found: {req.target_file}")
+
+    content = target.read_text(encoding="utf-8")
+    if req.placeholder not in content:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Placeholder not found in file: {req.placeholder}",
+        )
+
+    # 3. Copy images to target file's directory
+    source_dir = _get_source_dir(doc)
+    target_dir = target.parent
+    files = doc.get("files", [])
+    copied: list[str] = []
+    for fname in files:
+        src = source_dir / fname
+        if not src.is_file():
+            raise HTTPException(status_code=404, detail=f"Source image not found: {fname}")
+        dst = target_dir / fname
+        shutil.copy2(str(src), str(dst))
+        copied.append(fname)
+
+    # 4. Build markdown image references and replace placeholder
+    label = doc.get("label", doc["id"])
+    md_images = "\n".join(f"![{label}]({fname})" for fname in files)
+    content = content.replace(req.placeholder, md_images, 1)
+
+    # 5. Write back
+    target.write_text(content, encoding="utf-8")
+
+    return {
+        "success": True,
+        "replaced": req.placeholder,
+        "doc_id": doc["id"],
+        "doc_label": label,
+        "images_copied": copied,
+        "target_file": str(target),
+    }
+
+
 app.mount("/pages", StaticFiles(directory=str(PAGES_DIR)), name="pages")
+if DATA_DIR.is_dir():
+    app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")

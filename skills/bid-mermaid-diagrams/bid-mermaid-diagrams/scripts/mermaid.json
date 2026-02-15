@@ -1,0 +1,45 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#4A90D9",
+    "primaryTextColor": "#1a1a1a",
+    "primaryBorderColor": "#2c6fbb",
+    "secondaryColor": "#E8F4FD",
+    "secondaryTextColor": "#1a1a1a",
+    "secondaryBorderColor": "#a0c4e8",
+    "tertiaryColor": "#F0F7FF",
+    "tertiaryTextColor": "#1a1a1a",
+    "tertiaryBorderColor": "#c0d8f0",
+    "lineColor": "#555555",
+    "textColor": "#1a1a1a",
+    "mainBkg": "#E8F4FD",
+    "nodeBorder": "#2c6fbb",
+    "clusterBkg": "#F5F9FF",
+    "clusterBorder": "#a0c4e8",
+    "titleColor": "#1a1a1a",
+    "edgeLabelBackground": "#ffffff",
+    "fontSize": "14px",
+    "fontFamily": "Microsoft YaHei, SimHei, Arial, sans-serif"
+  },
+  "flowchart": {
+    "htmlLabels": true,
+    "curve": "basis",
+    "padding": 15,
+    "nodeSpacing": 50,
+    "rankSpacing": 60
+  },
+  "gantt": {
+    "titleTopMargin": 25,
+    "barHeight": 24,
+    "barGap": 6,
+    "topPadding": 50,
+    "leftPadding": 120,
+    "gridLineStartPadding": 35,
+    "fontSize": 12,
+    "sectionFontSize": 14,
+    "numberSectionStyles": 4
+  },
+  "er": {
+    "fontSize": 12
+  }
+}

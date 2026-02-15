@@ -10,6 +10,32 @@ description: >
 
 ## 工作流程
 
+### 0. 文档预处理（PDF 增强）
+
+当主要数据源为 PDF 且无可用 Word 版本时，先运行预处理脚本提升 PDF 数据质量。
+
+#### 0.1 解析 PDF 页面
+```bash
+python .claude/skills/bid-analysis/scripts/parse_pdf.py <pdf路径> --output <工作目录>/pdf_pages.json
+```
+
+读取输出 JSON，检查 `parser_used`（解析器）和 `is_scanned`（是否扫描件）。
+
+#### 0.2 提取 TOC
+```bash
+python .claude/skills/bid-analysis/scripts/extract_pdf_toc.py <pdf路径> --pages-json <工作目录>/pdf_pages.json --output <工作目录>/pdf_toc.json
+```
+
+读取输出 JSON：
+- 如 `has_embedded_toc=true`，使用 `page_sections` 进行定向章节读取
+- 如检测到 `toc_pages`，读取 `toc_page_text` 自行分析 TOC 结构
+
+#### 0.3 OCR（可选，仅扫描件）
+如 `is_scanned=true` 且 OCR_SERVICE_URL 已配置：
+```bash
+python .claude/skills/bid-analysis/scripts/ocr_pages.py <pdf路径> --pages 1-N --output <工作目录>/pdf_ocr.json
+```
+
 ### 1. 读取采购文件
 
 #### 1.1 格式优先级
@@ -41,11 +67,17 @@ for table in doc.tables:
 
 #### 1.3 PDF 文件读取方法
 
-- 使用 Read tool 读取 PDF，每次 15-20 页，分批覆盖全部内容
+- **预处理完成时**（步骤 0 已生成 `pdf_pages.json` 和 `pdf_toc.json`）：
+  - 按 TOC 的 `page_sections` 定位章节 `start_page`/`end_page`
+  - 从 `pdf_pages.json` 的 `pages` 数组中读取目标页范围的文本
+  - 表格已有 `[TABLE]...[/TABLE]` Markdown 标记，无需额外处理
+  - 如有 OCR 结果（`pdf_ocr.json`），用 OCR 文本替换对应页的空白文本
+- **预处理未完成/失败时**：回退原方案 — 使用 Read tool 读取 PDF，每次 15-20 页，分批覆盖全部内容
 - PDF 图片的 OCR 精度有限，**数字、金额、分值等关键数据必须反复确认**
 
 #### 1.4 读取策略
 
+- 如果 TOC 可用（`pdf_toc.json` 的 `page_sections` 非空），先读 TOC JSON 确定整体结构和页码范围，按章节定向读取
 - 采购文件可能分多册（第一册：通用部分/磋商文件，第二册：项目专用部分/采购需求），**全部读取**
 - 先读目录页确定整体结构，再按章节深入
 - **必须完整读取以下关键部分**：
@@ -178,6 +210,11 @@ for table in doc.tables:
 - 对应的评分项（如有）
 - 是否为★必须提供项
 
+### 脚本依赖
+- pdfplumber: `pip install pdfplumber`（PDF 表格检测）
+- PyMuPDF: 已安装（PDF 基础解析）
+- requests: 已安装（OCR 客户端，可选）
+
 ## 注意事项
 
 ### 数据准确性（最高优先级）
@@ -192,9 +229,32 @@ for table in doc.tables:
 
 ### 文件格式识别
 - Word (.docx)：用 python-docx 提取，重点提取所有表格
-- PDF：用 Read tool 分批读取，注意OCR精度问题
+- PDF：优先使用预处理脚本（parse_pdf.py + extract_pdf_toc.py），回退用 Read tool 分批读取，注意OCR精度问题
 - 如同时存在两种格式，明确告知用户以 Word 为准
 
 ### 评分矛盾处理
 - 如发现评分表子项之和与总分不符，**必须明确标注并建议向采购代理确认**
 - 不可自行"修正"或"合理推测"文件中的矛盾，原文怎么写就怎么报告
+
+## 输出文件
+
+分析报告固定输出到工作目录下的 `分析报告.md`（文件名不可更改，后续 skill 依赖此文件名）。
+
+## 完成状态
+
+分析完成后，输出以下结构化状态摘要，供 bid-manager 等上游 skill 读取：
+
+```
+--- BID-ANALYSIS COMPLETE ---
+项目名称: {项目名称}
+采购编号: {采购编号}
+预算金额: {预算金额}
+评分总分: {总分}
+评分大类: {价格X分, 技术X分, 商务X分, ...}
+附件数量: {响应文件组成中的附件总数}
+★必须附件: {★标记的附件数量}
+▲功能条目: {▲标注的技术需求条目数}
+输出文件: 分析报告.md
+状态: SUCCESS
+--- END ---
+```

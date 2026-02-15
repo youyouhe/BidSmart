@@ -21,7 +21,7 @@ description: >
 
 #### 1.1 读取分析报告（校验基准）
 
-从当前项目的分析报告（通常为工作目录下的 `分析报告*.md`）中提取：
+从当前项目的分析报告（工作目录下的 `分析报告.md`）中提取：
 - 项目概况（名称、编号、采购人、预算、截止时间）
 - 评分标准全表（评分因素、分值、评分子维度、评分规则）
 - 响应文件组成（全部附件清单 + ★标记）
@@ -264,3 +264,63 @@ description: >
 ### 问题定位要精确
 每个问题必须指出：在哪个文件、第几行（或哪个章节）、具体是什么问题。
 模糊的问题描述（"某处可能有问题"）对修改没有帮助。
+
+## 机器可读摘要
+
+核对报告末尾新增 JSON 摘要块，供 bid-manager 自动解析并分派修复任务：
+
+```markdown
+<!-- ASSEMBLY_SUMMARY
+{
+  "red_count": 3,
+  "yellow_count": 5,
+  "blue_count": 2,
+  "red_issues": [
+    {
+      "id": "R1",
+      "description": "缺少★必须文件：附件5-商务偏离表",
+      "file": null,
+      "target_skill": "bid-commercial-proposal"
+    },
+    {
+      "id": "R2",
+      "description": "技术响应表条目数不匹配（应有120条，实有115条）",
+      "file": "15-技术服务响应表.md",
+      "target_skill": "bid-tech-proposal"
+    }
+  ],
+  "yellow_issues": [
+    {
+      "id": "Y1",
+      "description": "评分子维度'系统安全性'缺少独立章节",
+      "file": "16-总体技术方案.md",
+      "target_skill": "bid-tech-proposal"
+    }
+  ]
+}
+ASSEMBLY_SUMMARY -->
+```
+
+字段说明：
+- `red_count` / `yellow_count` / `blue_count`：各级别问题数量
+- `red_issues[]` / `yellow_issues[]`：问题详情数组
+  - `id`：问题编号（R1/R2... 或 Y1/Y2...）
+  - `description`：问题描述
+  - `file`：涉及的文件（缺失文件时为 null）
+  - `target_skill`：应由哪个 skill 修复（`bid-tech-proposal` / `bid-commercial-proposal` / `bid-analysis`）
+
+## 完成状态
+
+质检完成后，输出以下结构化状态摘要：
+
+```
+--- BID-ASSEMBLY COMPLETE ---
+🔴必改: {N}个
+🟡建议: {N}个
+🔵提醒: {N}个
+附件覆盖率: {已有}/{应有}
+★文件覆盖率: {已有}/{应有}
+输出文件: 核对报告.md, 00-目录.md, 装订指南.md
+状态: SUCCESS
+--- END ---
+```
